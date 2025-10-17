@@ -7,7 +7,6 @@ console.log('🔑 API Key value:', ALPHA_VANTAGE_API_KEY?.substring(0, 8) + '...
 
 // Indian stock symbols for Alpha Vantage (use .BSE suffix for Indian stocks)
 const SYMBOL_MAPPING: Record<string, string> = {
-  // Use popular US stocks for demo since Alpha Vantage has better coverage
   'RELIANCE': 'AAPL',    // Apple
   'TCS': 'GOOGL',        // Google
   'HDFCBANK': 'MSFT',    // Microsoft
@@ -113,10 +112,10 @@ class StockApiService {
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
     const currentTime = currentHour * 60 + currentMinute;
-    
+
     const marketOpen = 9 * 60; // 9:00 AM
     const marketClose = 15 * 60 + 30; // 3:30 PM
-    
+
     return currentTime >= marketOpen && currentTime < marketClose;
   }
 
@@ -141,7 +140,7 @@ class StockApiService {
     }
 
     console.log(`🔄 Fetching real-time data for ${symbol}...`);
-    
+
     if (!ALPHA_VANTAGE_API_KEY || ALPHA_VANTAGE_API_KEY === 'demo' || ALPHA_VANTAGE_API_KEY === 'your_api_key_here') {
       console.warn('⚠️ No valid Alpha Vantage API key found. Using fallback data.');
       return this.getFallbackData(symbol);
@@ -151,22 +150,22 @@ class StockApiService {
       // Use Alpha Vantage API for real data
       const mappedSymbol = SYMBOL_MAPPING[symbol] || symbol;
       const apiUrl = `${BASE_URL}?function=GLOBAL_QUOTE&symbol=${mappedSymbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
-      
+
       console.log(`📡 API Request: ${mappedSymbol} (${symbol})`);
       console.log(`🌐 Full API URL: ${apiUrl.replace(ALPHA_VANTAGE_API_KEY, 'API_KEY_HIDDEN')}`);
-      
+
       const response = await fetch(
         apiUrl
       );
-      
+
       if (!response.ok) {
         console.error(`❌ API request failed with status: ${response.status}`);
         throw new Error(`API request failed with status: ${response.status}`);
       }
-      
+
       const data = await response.json();
       console.log(`📊 API Response for ${symbol}:`, data);
-      
+
       if (data['Error Message'] || data['Note']) {
         console.warn(`⚠️ API Error for ${symbol}:`, data['Error Message'] || data['Note']);
         throw new Error('API limit reached or invalid symbol');
@@ -199,21 +198,21 @@ class StockApiService {
   async getMultipleQuotes(symbols: string[]): Promise<StockQuote[]> {
     console.log('🔄 Fetching multiple quotes for symbols:', symbols);
     console.log('🔑 Using API Key:', ALPHA_VANTAGE_API_KEY ? 'Present' : 'Missing');
-    
+
     if (!ALPHA_VANTAGE_API_KEY || ALPHA_VANTAGE_API_KEY === 'demo' || ALPHA_VANTAGE_API_KEY === 'your_api_key_here') {
       console.warn('⚠️ No valid API key. Using fallback data for all stocks.');
       return symbols.map(symbol => this.getFallbackData(symbol));
     }
-    
+
     // Fetch quotes with a small delay between requests to avoid rate limiting
     const quotes: StockQuote[] = [];
-    
+
     for (const symbol of symbols) {
       try {
         console.log(`🔄 Processing symbol ${symbols.indexOf(symbol) + 1}/${symbols.length}: ${symbol}`);
         const quote = await this.getStockQuote(symbol);
         quotes.push(quote);
-        
+
         // Small delay to avoid hitting rate limits (Alpha Vantage allows 5 calls per minute for free tier)
         if (symbols.indexOf(symbol) < symbols.length - 1) { // Don't wait after the last call
           console.log('⏳ Waiting 15 seconds before next API call...');
@@ -226,7 +225,7 @@ class StockApiService {
         // Continue with other symbols even if one fails
       }
     }
-    
+
     console.log(`✅ Successfully fetched ${quotes.length} out of ${symbols.length} quotes`);
     return quotes;
   }
@@ -271,7 +270,7 @@ class StockApiService {
     const isOpen = this.isMarketOpen();
     const now = new Date();
     const currentTime = now.getHours() * 60 + now.getMinutes();
-    
+
     if (isOpen) {
       const closeTime = 15 * 60 + 30; // 3:30 PM
       const minutesUntilClose = closeTime - currentTime;
@@ -282,17 +281,17 @@ class StockApiService {
     } else {
       const openTime = 9 * 60; // 9:00 AM
       let minutesUntilOpen;
-      
+
       if (currentTime < openTime) {
         minutesUntilOpen = openTime - currentTime;
       } else {
         // Market closed for the day, opens tomorrow
         minutesUntilOpen = (24 * 60) - currentTime + openTime;
       }
-      
+
       const hours = Math.floor(minutesUntilOpen / 60);
       const minutes = minutesUntilOpen % 60;
-      
+
       return {
         isOpen: false,
         nextChange: hours > 12 ? 'Market opens tomorrow at 9:00 AM' : `Market opens in ${hours}h ${minutes}m`
