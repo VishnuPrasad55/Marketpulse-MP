@@ -1,26 +1,24 @@
-// Stock API service for real-time data
-const ALPHA_VANTAGE_API_KEY = import.meta.env.VITE_ALPHA_VANTAGE_API_KEY || 'demo';
-const BASE_URL = 'https://www.alphavantage.co/query';
-
-console.log('🔑 Alpha Vantage API Key loaded:', ALPHA_VANTAGE_API_KEY ? 'Present' : 'Missing');
-console.log('🔑 API Key value:', ALPHA_VANTAGE_API_KEY?.substring(0, 8) + '...');
-
-// Indian stock symbols for Alpha Vantage (use .BSE suffix for Indian stocks)
-const SYMBOL_MAPPING: Record<string, string> = {
-  'RELIANCE': 'AAPL',    // Apple
-  'TCS': 'GOOGL',        // Google
-  'HDFCBANK': 'MSFT',    // Microsoft
-  'ICICIBANK': 'AMZN',   // Amazon
-  'INFY': 'TSLA',        // Tesla
-  'TATASTEEL': 'META',   // Meta
-  'SBIN': 'NVDA',        // Nvidia
-  'BAJAJAUTO': 'NFLX',   // Netflix
-  'HINDUNILVR': 'ADBE',  // Adobe
-  'LT': 'CRM',           // Salesforce
-  'TATAMOTORS.B': 'ORCL', // Oracle
-  'BHARTIARTL.B': 'INTC', // Intel
-  'ASIANPAINT.B': 'AMD'   // AMD
+const FALLBACK_STOCK_DATA: Record<string, any> = {
+  'RELIANCE': { price: 2875.45, change: 15.75, changePercent: 0.55, volume: 2347890 },
+  'TCS': { price: 3421.30, change: -23.45, changePercent: -0.68, volume: 1250680 },
+  'HDFCBANK': { price: 1678.90, change: 32.40, changePercent: 1.97, volume: 3568940 },
+  'ICICIBANK': { price: 945.25, change: 5.30, changePercent: 0.56, volume: 2984570 },
+  'INFY': { price: 1560.40, change: -12.70, changePercent: -0.81, volume: 1876540 },
+  'TATASTEEL': { price: 145.75, change: 2.30, changePercent: 1.60, volume: 8934560 },
+  'SBIN': { price: 625.50, change: -8.20, changePercent: -1.29, volume: 5678920 },
+  'BAJAJAUTO': { price: 8234.60, change: 125.40, changePercent: 1.55, volume: 456780 },
+  'HINDUNILVR': { price: 2456.80, change: -15.60, changePercent: -0.63, volume: 987650 },
+  'LT': { price: 3245.90, change: 45.30, changePercent: 1.42, volume: 1234560 },
+  'TATAMOTORS.B': { price: 876.45, change: 12.80, changePercent: 1.48, volume: 6789450 },
+  'BHARTIARTL.B': { price: 1234.70, change: -18.90, changePercent: -1.51, volume: 2345670 },
+  'ASIANPAINT.B': { price: 3012.35, change: 34.50, changePercent: 1.16, volume: 876540 }
 };
+
+const FALLBACK_INDEX_DATA = [
+  { name: 'NIFTY 50', value: 19425.33, change: 156.78, changePercent: 0.81 },
+  { name: 'SENSEX', value: 64718.56, change: 445.87, changePercent: 0.69 },
+  { name: 'NIFTY BANK', value: 44467.90, change: 532.45, changePercent: 1.21 }
+];
 
 export interface StockQuote {
   symbol: string;
@@ -38,84 +36,19 @@ export interface MarketIndex {
   changePercent: number;
 }
 
-// Fallback data for when API is unavailable
-const FALLBACK_STOCK_DATA: Record<string, StockQuote> = {
-  'RELIANCE': {
-    symbol: 'RELIANCE',
-    price: 2875.45,
-    change: 15.75,
-    changePercent: 0.55,
-    volume: 2347890,
-    lastUpdated: new Date().toISOString()
-  },
-  'TCS': {
-    symbol: 'TCS',
-    price: 3421.30,
-    change: -23.45,
-    changePercent: -0.68,
-    volume: 1250680,
-    lastUpdated: new Date().toISOString()
-  },
-  'HDFCBANK': {
-    symbol: 'HDFCBANK',
-    price: 1678.90,
-    change: 32.40,
-    changePercent: 1.97,
-    volume: 3568940,
-    lastUpdated: new Date().toISOString()
-  },
-  'ICICIBANK': {
-    symbol: 'ICICIBANK',
-    price: 945.25,
-    change: 5.30,
-    changePercent: 0.56,
-    volume: 2984570,
-    lastUpdated: new Date().toISOString()
-  },
-  'INFY': {
-    symbol: 'INFY',
-    price: 1560.40,
-    change: -12.70,
-    changePercent: -0.81,
-    volume: 1876540,
-    lastUpdated: new Date().toISOString()
-  }
-};
-
-const FALLBACK_INDEX_DATA: MarketIndex[] = [
-  {
-    name: 'NIFTY 50',
-    value: 19425.33,
-    change: 156.78,
-    changePercent: 0.81
-  },
-  {
-    name: 'SENSEX',
-    value: 64718.56,
-    change: 445.87,
-    changePercent: 0.69
-  },
-  {
-    name: 'NIFTY BANK',
-    value: 44467.90,
-    change: 532.45,
-    changePercent: 1.21
-  }
-];
-
 class StockApiService {
   private cache = new Map<string, { data: any; timestamp: number }>();
-  private readonly CACHE_DURATION = 60000; // 1 minute cache
+  private readonly CACHE_DURATION = 60000;
 
   private isMarketOpen(): boolean {
     const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istTime = new Date(now.getTime() + istOffset);
+    const currentHour = istTime.getUTCHours();
+    const currentMinute = istTime.getUTCMinutes();
     const currentTime = currentHour * 60 + currentMinute;
-
-    const marketOpen = 9 * 60; // 9:00 AM
-    const marketClose = 15 * 60 + 30; // 3:30 PM
-
+    const marketOpen = 9 * 60 + 15;
+    const marketClose = 15 * 60 + 30;
     return currentTime >= marketOpen && currentTime < marketClose;
   }
 
@@ -139,72 +72,52 @@ class StockApiService {
       return cached;
     }
 
-    console.log(`🔄 Fetching real-time data for ${symbol}...`);
-
-    if (!ALPHA_VANTAGE_API_KEY || ALPHA_VANTAGE_API_KEY === 'demo' || ALPHA_VANTAGE_API_KEY === 'your_api_key_here') {
-      console.warn('⚠️ No valid Alpha Vantage API key found. Using fallback data.');
-      return this.getFallbackData(symbol);
-    }
+    console.log(`🔄 Fetching real-time data from NSE for ${symbol}...`);
 
     try {
-      // Use Alpha Vantage API for real data
-      const mappedSymbol = SYMBOL_MAPPING[symbol] || symbol;
-      const apiUrl = `${BASE_URL}?function=GLOBAL_QUOTE&symbol=${mappedSymbol}&apikey=${ALPHA_VANTAGE_API_KEY}`;
+      const nseSymbol = symbol.replace('.B', '');
+      const apiUrl = `https://www.nseindia.com/api/quote-equity?symbol=${nseSymbol}`;
 
-      console.log(`📡 API Request: ${mappedSymbol} (${symbol})`);
-      console.log(`🌐 Full API URL: ${apiUrl.replace(ALPHA_VANTAGE_API_KEY, 'API_KEY_HIDDEN')}`);
+      console.log(`📡 NSE API Request: ${nseSymbol}`);
 
-      const response = await fetch(
-        apiUrl
-      );
+      const response = await fetch(apiUrl, {
+        headers: {
+          'Accept': 'application/json',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
 
       if (!response.ok) {
-        console.error(`❌ API request failed with status: ${response.status}`);
-        throw new Error(`API request failed with status: ${response.status}`);
+        console.error(`❌ NSE API request failed with status: ${response.status}`);
+        throw new Error(`API request failed: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log(`📊 API Response for ${symbol}:`, data);
+      console.log(`📊 NSE API Response for ${symbol}:`, data);
 
-      if (data['Error Message'] || data['Note']) {
-        console.warn(`⚠️ API Error for ${symbol}:`, data['Error Message'] || data['Note']);
-        throw new Error('API limit reached or invalid symbol');
-      }
-
-      const quote = data['Global Quote'];
-      if (!quote) {
-        console.warn(`⚠️ No quote data for ${symbol}:`, data);
-        throw new Error('No quote data available');
-      }
-
+      const priceData = data.priceInfo || {};
       const stockQuote: StockQuote = {
         symbol,
-        price: parseFloat(quote['05. price']),
-        change: parseFloat(quote['09. change']),
-        changePercent: parseFloat(quote['10. change percent'].replace('%', '')),
-        volume: parseInt(quote['06. volume']),
-        lastUpdated: quote['07. latest trading day']
+        price: priceData.lastPrice || 0,
+        change: priceData.change || 0,
+        changePercent: priceData.pChange || 0,
+        volume: data.preOpenMarket?.totalTradedVolume || 0,
+        lastUpdated: new Date().toISOString()
       };
 
-      console.log(`✅ Successfully fetched data for ${symbol}:`, stockQuote);
+      console.log(`✅ Successfully fetched NSE data for ${symbol}:`, stockQuote);
       this.setCachedData(cacheKey, stockQuote);
       return stockQuote;
     } catch (error) {
-      console.warn(`❌ Failed to fetch real data for ${symbol}, using fallback:`, error);
+      console.warn(`❌ Failed to fetch NSE data for ${symbol}, using fallback:`, error);
       return this.getFallbackData(symbol);
     }
   }
 
   async getMultipleQuotes(symbols: string[]): Promise<StockQuote[]> {
-    console.log('🔄 Fetching multiple quotes for symbols:', symbols);
-    console.log('🔑 Using API Key:', ALPHA_VANTAGE_API_KEY ? 'Present' : 'Missing');
+    console.log('🔄 Fetching multiple quotes from NSE for symbols:', symbols);
 
-    if (!ALPHA_VANTAGE_API_KEY || ALPHA_VANTAGE_API_KEY === 'demo' || ALPHA_VANTAGE_API_KEY === 'your_api_key_here') {
-      console.warn('⚠️ No valid API key. Using fallback data for all stocks.');
-      return symbols.map(symbol => this.getFallbackData(symbol));
-    }
-
-    // Fetch quotes with a small delay between requests to avoid rate limiting
     const quotes: StockQuote[] = [];
 
     for (const symbol of symbols) {
@@ -213,16 +126,13 @@ class StockApiService {
         const quote = await this.getStockQuote(symbol);
         quotes.push(quote);
 
-        // Small delay to avoid hitting rate limits (Alpha Vantage allows 5 calls per minute for free tier)
-        if (symbols.indexOf(symbol) < symbols.length - 1) { // Don't wait after the last call
-          console.log('⏳ Waiting 15 seconds before next API call...');
-          await new Promise(resolve => setTimeout(resolve, 15000)); // 15 seconds between calls
+        if (symbols.indexOf(symbol) < symbols.length - 1) {
+          console.log('⏳ Waiting 1 second before next API call...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       } catch (error) {
         console.error(`❌ Failed to fetch quote for ${symbol}:`, error);
-        // Add fallback data for failed requests
         quotes.push(this.getFallbackData(symbol));
-        // Continue with other symbols even if one fails
       }
     }
 
@@ -236,56 +146,72 @@ class StockApiService {
     if (cached) return cached;
 
     try {
-      // In a real implementation, you would fetch from a proper Indian market API
-      // For now, we'll simulate with some variation on fallback data
-      const indices = FALLBACK_INDEX_DATA.map(index => {
-        const variation = (Math.random() - 0.5) * 0.02; // ±1% variation
-        const newValue = index.value * (1 + variation);
-        const change = newValue - index.value;
-        const changePercent = (change / index.value) * 100;
-
-        return {
-          ...index,
-          value: newValue,
-          change,
-          changePercent
-        };
+      console.log('🔄 Fetching market indices from NSE...');
+      const response = await fetch('https://www.nseindia.com/api/allIndices', {
+        headers: {
+          'Accept': 'application/json',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
       });
 
-      this.setCachedData(cacheKey, indices);
-      return indices;
+      if (!response.ok) {
+        throw new Error('Failed to fetch indices');
+      }
+
+      const data = await response.json();
+      const indices: MarketIndex[] = [];
+
+      const indexNames = ['NIFTY 50', 'NIFTY BANK'];
+      for (const indexData of data.data || []) {
+        if (indexNames.includes(indexData.index)) {
+          indices.push({
+            name: indexData.index,
+            value: indexData.last || 0,
+            change: indexData.change || 0,
+            changePercent: indexData.percentChange || 0
+          });
+        }
+      }
+
+      if (indices.length > 0) {
+        console.log('✅ Successfully fetched NSE indices:', indices);
+        this.setCachedData(cacheKey, indices);
+        return indices;
+      }
+
+      throw new Error('No index data found');
     } catch (error) {
-      console.warn('Failed to fetch market indices, using fallback:', error);
+      console.warn('❌ Failed to fetch market indices from NSE, using fallback:', error);
       return FALLBACK_INDEX_DATA;
     }
   }
 
-  // Method to refresh all data (useful for periodic updates)
   clearCache(): void {
     this.cache.clear();
   }
 
-  // Get market status
   getMarketStatus(): { isOpen: boolean; nextChange: string } {
     const isOpen = this.isMarketOpen();
     const now = new Date();
-    const currentTime = now.getHours() * 60 + now.getMinutes();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istTime = new Date(now.getTime() + istOffset);
+    const currentTime = istTime.getUTCHours() * 60 + istTime.getUTCMinutes();
 
     if (isOpen) {
-      const closeTime = 15 * 60 + 30; // 3:30 PM
+      const closeTime = 15 * 60 + 30;
       const minutesUntilClose = closeTime - currentTime;
       return {
         isOpen: true,
         nextChange: `Market closes in ${Math.floor(minutesUntilClose / 60)}h ${minutesUntilClose % 60}m`
       };
     } else {
-      const openTime = 9 * 60; // 9:00 AM
+      const openTime = 9 * 60 + 15;
       let minutesUntilOpen;
 
       if (currentTime < openTime) {
         minutesUntilOpen = openTime - currentTime;
       } else {
-        // Market closed for the day, opens tomorrow
         minutesUntilOpen = (24 * 60) - currentTime + openTime;
       }
 
@@ -294,30 +220,29 @@ class StockApiService {
 
       return {
         isOpen: false,
-        nextChange: hours > 12 ? 'Market opens tomorrow at 9:00 AM' : `Market opens in ${hours}h ${minutes}m`
+        nextChange: hours > 12 ? 'Market opens tomorrow at 9:15 AM IST' : `Market opens in ${hours}h ${minutes}m`
       };
     }
   }
 
   private getFallbackData(symbol: string): StockQuote {
-    // Return fallback data with some randomization to simulate market movement
     const fallback = FALLBACK_STOCK_DATA[symbol];
     if (fallback) {
-      const variation = (Math.random() - 0.5) * 0.02; // ±1% variation
+      const variation = (Math.random() - 0.5) * 0.02;
       const newPrice = fallback.price * (1 + variation);
       const change = newPrice - fallback.price;
       const changePercent = (change / fallback.price) * 100;
 
       return {
-        ...fallback,
+        symbol,
         price: newPrice,
         change,
         changePercent,
+        volume: fallback.volume,
         lastUpdated: new Date().toISOString()
       };
     }
 
-    // Default fallback
     return {
       symbol,
       price: 1000 + Math.random() * 2000,
