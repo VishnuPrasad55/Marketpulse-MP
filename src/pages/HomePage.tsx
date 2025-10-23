@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, BarChart2, LineChart, Clock, Award, ArrowRight } from 'lucide-react';
+import { Award, ArrowRight } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 
 export const HomePage: React.FC = () => {
@@ -70,7 +70,7 @@ export const HomePage: React.FC = () => {
           className={`p-8 rounded-lg transition-all duration-500 scroll-animate opacity-0 ${
             isDarkMode ? 'bg-gray-800' : 'bg-white shadow-md'
           } hover:shadow-emerald-500/20 hover:shadow-2xl hover:-translate-y-1`}
-          style={{ '--slide-direction': '-30px' } as React.CSSProperties}
+          style={{ '--slide-direction': '-100px' } as React.CSSProperties}
         >
           <h2 className={`text-2xl font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
             Get Started
@@ -127,7 +127,7 @@ export const HomePage: React.FC = () => {
           className={`p-8 rounded-lg relative overflow-hidden transition-all duration-500 scroll-animate opacity-0 ${
             isDarkMode ? 'bg-gray-800' : 'bg-white shadow-md'
           } hover:shadow-emerald-500/20 hover:shadow-2xl hover:-translate-y-1`}
-          style={{ '--slide-direction': '30px' } as React.CSSProperties}
+          style={{ '--slide-direction': '100px' } as React.CSSProperties}
         >
           <div className="relative z-10">
             <h2 className={`text-2xl font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
@@ -190,7 +190,10 @@ export const HomePage: React.FC = () => {
             </button>
           </div>
           <div className="absolute right-0 bottom-0 transform translate-x-1/4 translate-y-1/4 opacity-5 animate-float">
-            <TrendingUp size={240} />
+            <svg width="240" height="240" viewBox="0 0 24 24" fill="none">
+              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points="17 6 23 6 23 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
         </div>
       </div>
@@ -202,10 +205,10 @@ export const HomePage: React.FC = () => {
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           {[
-            { icon: TrendingUp, title: 'Advanced Stock Screening', desc: 'Filter stocks based on various technical and fundamental parameters.', color: 'blue' },
-            { icon: BarChart2, title: 'Comprehensive Backtesting', desc: 'Test your strategies against historical data with detailed performance metrics.', color: 'purple' },
-            { icon: LineChart, title: 'Predictive Analytics', desc: 'Get future price predictions based on advanced machine learning models.', color: 'green' },
-            { icon: Clock, title: 'Automated Trading', desc: 'Set up and deploy algorithmic trading strategies with customizable parameters.', color: 'amber' }
+            { id: 'trending', title: 'Advanced Stock Screening', desc: 'Filter stocks based on various technical and fundamental parameters.', color: 'blue' },
+            { id: 'barchart', title: 'Comprehensive Backtesting', desc: 'Test your strategies against historical data with detailed performance metrics.', color: 'purple' },
+            { id: 'linechart', title: 'Predictive Analytics', desc: 'Get future price predictions based on advanced machine learning models.', color: 'green' },
+            { id: 'clock', title: 'Automated Trading', desc: 'Set up and deploy algorithmic trading strategies with customizable parameters.', color: 'amber' }
           ].map((feature, i) => (
             <div
               key={i}
@@ -217,7 +220,31 @@ export const HomePage: React.FC = () => {
                 <div className={`p-3 rounded-full transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg group-hover:shadow-${feature.color}-500/50 ${
                   isDarkMode ? `bg-${feature.color}-900` : `bg-${feature.color}-100`
                 }`}>
-                  <feature.icon size={24} className={`${isDarkMode ? `text-${feature.color}-400` : `text-${feature.color}-600`} group-hover:animate-bounce`} />
+                  {feature.id === 'trending' && (
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className={`${isDarkMode ? `text-${feature.color}-400` : `text-${feature.color}-600`}`}>
+                      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:animate-arrow-up" />
+                      <polyline points="17 6 23 6 23 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:animate-arrow-shrink" />
+                    </svg>
+                  )}
+                  {feature.id === 'barchart' && (
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className={`${isDarkMode ? `text-${feature.color}-400` : `text-${feature.color}-600`}`}>
+                      <line x1="18" y1="20" x2="18" y2="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="group-hover:animate-bar-1" style={{ transformOrigin: 'center bottom' }} />
+                      <line x1="12" y1="20" x2="12" y2="4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="group-hover:animate-bar-2" style={{ transformOrigin: 'center bottom' }} />
+                      <line x1="6" y1="20" x2="6" y2="14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="group-hover:animate-bar-3" style={{ transformOrigin: 'center bottom' }} />
+                    </svg>
+                  )}
+                  {feature.id === 'linechart' && (
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className={`${isDarkMode ? `text-${feature.color}-400` : `text-${feature.color}-600`}`}>
+                      <polyline points="3 17 9 11 13 15 21 7" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" className="group-hover:animate-line-draw" />
+                    </svg>
+                  )}
+                  {feature.id === 'clock' && (
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className={`${isDarkMode ? `text-${feature.color}-400` : `text-${feature.color}-600`}`}>
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
+                      <polyline points="12 6 12 12 16 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:animate-clock-hand" style={{ transformOrigin: '12px 12px' }} />
+                      <line x1="12" y1="12" x2="12" y2="8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="group-hover:animate-clock-hour" style={{ transformOrigin: '12px 12px' }} />
+                    </svg>
+                  )}
                 </div>
               </div>
               <h3 className={`text-lg font-medium mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
@@ -297,7 +324,7 @@ export const HomePage: React.FC = () => {
           }
         }
         @keyframes fadeInScroll {
-          from { opacity: 0; transform: translateY(30px); }
+          from { opacity: 0; transform: translateY(100px); }
           to { opacity: 1; transform: translateY(0); }
         }
         @keyframes chartGrow {
@@ -308,10 +335,50 @@ export const HomePage: React.FC = () => {
           0%, 100% { transform: translate(25%, 25%) translateY(0px); }
           50% { transform: translate(25%, 25%) translateY(-20px); }
         }
+        @keyframes arrow-up {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-3px); }
+        }
+        @keyframes arrow-shrink {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(0.85); }
+        }
+        @keyframes bar-grow-1 {
+          0%, 100% { transform: scaleY(1); }
+          50% { transform: scaleY(0.7); }
+        }
+        @keyframes bar-grow-2 {
+          0%, 100% { transform: scaleY(1); }
+          50% { transform: scaleY(0.85); }
+        }
+        @keyframes bar-grow-3 {
+          0%, 100% { transform: scaleY(1); }
+          50% { transform: scaleY(0.6); }
+        }
+        @keyframes line-draw {
+          0% { stroke-dasharray: 0, 100; }
+          100% { stroke-dasharray: 100, 0; }
+        }
+        @keyframes clock-hand-rotate {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes clock-hour-rotate {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
 
         .animate-fadeIn { animation: fadeIn 0.8s ease-out; }
         .animate-blink { animation: blink 1s step-end infinite; }
         .animate-float { animation: float 3s ease-in-out infinite; }
+        .animate-arrow-up { animation: arrow-up 0.6s ease-in-out infinite; }
+        .animate-arrow-shrink { animation: arrow-shrink 0.6s ease-in-out infinite; }
+        .animate-bar-1 { animation: bar-grow-1 1s ease-in-out infinite; }
+        .animate-bar-2 { animation: bar-grow-2 1s ease-in-out infinite 0.1s; }
+        .animate-bar-3 { animation: bar-grow-3 1s ease-in-out infinite 0.2s; }
+        .animate-line-draw { animation: line-draw 2s ease-in-out infinite; }
+        .animate-clock-hand { animation: clock-hand-rotate 2s linear infinite; }
+        .animate-clock-hour { animation: clock-hour-rotate 8s linear infinite; }
 
         .scroll-animate.animate-in {
           animation: slideInScroll 0.8s ease-out forwards;
