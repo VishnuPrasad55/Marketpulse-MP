@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AppLayout } from './layouts/AppLayout';
 import { HomePage } from './pages/HomePage';
@@ -11,6 +11,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { AppProvider } from './context/AppContext';
 import { useAuth } from './hooks/useAuth';
+import './index.css';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -45,8 +46,25 @@ function AppContent() {
 }
 
 function App() {
+  useEffect(() => {
+    const light = document.querySelector('.cursor-light') as HTMLElement | null;
+    if (!light) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+    light.style.left = `${e.clientX}px`;
+    light.style.top = `${e.clientY}px`;
+  };
+
+    document.addEventListener('mousemove', handleMouseMove);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+    };
+  }, []);
+
   return (
     <AppProvider>
+      <div className="cursor-light" />
       <AppContent />
     </AppProvider>
   );
