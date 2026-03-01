@@ -55,6 +55,20 @@ export function useAuth() {
     return { error };
   };
 
+  const signInWithGoogle = async () => {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/`,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+      },
+    });
+    return { data, error };
+  };
+
   return {
     user,
     session,
@@ -62,5 +76,6 @@ export function useAuth() {
     signUp,
     signIn,
     signOut,
+    signInWithGoogle,
   };
 }

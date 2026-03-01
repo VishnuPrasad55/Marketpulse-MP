@@ -11,6 +11,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { AppProvider } from './context/AppContext';
 import { useAuth } from './hooks/useAuth';
+import { supabase } from './lib/supabase';
 import './index.css';
 
 function AppContent() {
@@ -46,14 +47,21 @@ function AppContent() {
 }
 
 function App() {
+  // Recover session from OAuth redirect hash (e.g., after Google sign-in)
+  useEffect(() => {
+    if (window.location.hash.includes('access_token')) {
+      supabase.auth.getSession();
+    }
+  }, []);
+
   useEffect(() => {
     const light = document.querySelector('.cursor-light') as HTMLElement | null;
     if (!light) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-    light.style.left = `${e.clientX}px`;
-    light.style.top = `${e.clientY}px`;
-  };
+      light.style.left = `${e.clientX}px`;
+      light.style.top = `${e.clientY}px`;
+    };
 
     document.addEventListener('mousemove', handleMouseMove);
 
