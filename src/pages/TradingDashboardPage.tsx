@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { stockApi } from '../services/stockApi';
+import { ZerodhaPanel } from '../components/ZerodhaPanel';
 import {
   LineChart,
   Line,
@@ -38,10 +39,10 @@ const getMarketStatus = () => {
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
   const currentTime = currentHour * 60 + currentMinute;
-  
+
   const marketOpen = 9 * 60; // 9:00 AM
   const marketClose = 15 * 60 + 30; // 3:30 PM
-  
+
   return {
     isOpen: currentTime >= marketOpen && currentTime < marketClose,
     openTime: marketOpen,
@@ -65,7 +66,7 @@ export function TradingDashboardPage() {
   const hasPortfolio = userPortfolio.length > 0;
 
   // Generate portfolio data only for user's actual holdings
-  const portfolioAllocation = hasPortfolio 
+  const portfolioAllocation = hasPortfolio
     ? userPortfolio.map((holding, index) => ({
         name: holding.stock_symbol,
         value: (holding.quantity * holding.current_price),
@@ -74,7 +75,7 @@ export function TradingDashboardPage() {
     : [];
 
   // Generate recent trades only for user's portfolio
-  const recentTrades = hasPortfolio 
+  const recentTrades = hasPortfolio
     ? userPortfolio.slice(0, 5).map((holding, index) => ({
         symbol: holding.stock_symbol,
         type: 'BUY',
@@ -85,19 +86,21 @@ export function TradingDashboardPage() {
       }))
     : [];
 
+  <ZerodhaPanel className="mt-8" />
+
   // Calculate portfolio metrics based on user's actual holdings
-  const portfolioValue = hasPortfolio 
+  const portfolioValue = hasPortfolio
     ? userPortfolio.reduce((total, holding) => total + (holding.current_price * holding.quantity), 0)
     : 0;
-  
-  const todaysPnL = hasPortfolio 
+
+  const todaysPnL = hasPortfolio
     ? userPortfolio.reduce((total, holding) => {
         const dailyChange = Math.random() * 10 - 5; // Mock daily change
         return total + (dailyChange * holding.quantity);
       }, 0)
     : 0;
 
-  const totalPnL = hasPortfolio 
+  const totalPnL = hasPortfolio
     ? userPortfolio.reduce((total, holding) => {
         return total + ((holding.current_price - holding.purchase_price) * holding.quantity);
       }, 0)
@@ -106,7 +109,7 @@ export function TradingDashboardPage() {
   const winRate = hasPortfolio ? Math.floor(Math.random() * 30) + 60 : 0; // 60-90%
 
   // Performance data based on user's portfolio
-  const performanceData = hasPortfolio 
+  const performanceData = hasPortfolio
     ? Array.from({ length: 30 }, (_, i) => ({
         date: new Date(Date.now() - (29 - i) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         value: portfolioValue * (0.8 + Math.random() * 0.4), // ±20% variation
@@ -189,7 +192,7 @@ export function TradingDashboardPage() {
             </p>
           </div>
           <div className={`flex items-center px-4 py-2 rounded-md ${
-            marketStatus.isOpen 
+            marketStatus.isOpen
               ? isDarkMode ? 'bg-emerald-900/20 text-emerald-400' : 'bg-emerald-100 text-emerald-700'
               : isDarkMode ? 'bg-red-900/20 text-red-400' : 'bg-red-100 text-red-700'
           }`}>
@@ -432,7 +435,7 @@ export function TradingDashboardPage() {
                   </tbody>
                 </table>
               </div>
-              
+
               {/* Portfolio Holdings */}
               {hasPortfolio && (
                 <div className="mt-6">
@@ -473,8 +476,8 @@ export function TradingDashboardPage() {
                               disabled={!marketStatus.isOpen}
                               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
                                 !marketStatus.isOpen
-                                  ? isDarkMode 
-                                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
+                                  ? isDarkMode
+                                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
                                     : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                   : isDarkMode
                                   ? 'bg-red-600 hover:bg-red-500 text-white'
@@ -547,8 +550,8 @@ export function TradingDashboardPage() {
                       disabled={!marketStatus.isOpen}
                       className={`px-3 py-1 rounded-md text-sm font-medium transition-colors flex items-center ${
                         !marketStatus.isOpen
-                          ? isDarkMode 
-                            ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
+                          ? isDarkMode
+                            ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
                             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                           : isDarkMode
                           ? 'bg-emerald-600 hover:bg-emerald-500 text-white'

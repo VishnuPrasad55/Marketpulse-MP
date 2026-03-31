@@ -1,10 +1,27 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrlRaw = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKeyRaw = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
+let supabaseUrl = typeof supabaseUrlRaw === 'string' ? supabaseUrlRaw.trim() : '';
+const supabaseAnonKey = typeof supabaseAnonKeyRaw === 'string' ? supabaseAnonKeyRaw.trim() : '';
+
+const fallbackSupabaseUrl = 'https://czeyjzymjlvznbeopioy.supabase.co';
+
+if (!supabaseUrl || supabaseUrl === 'your_supabase_project_url') {
+  console.warn('Supabase URL is placeholder/missing, using fallback URL:', fallbackSupabaseUrl);
+  supabaseUrl = fallbackSupabaseUrl;
+}
+
+if (!supabaseAnonKey) {
+  console.error('Supabase env:', { supabaseUrlRaw, supabaseAnonKeyRaw });
+  throw new Error('Missing Supabase environment variable: VITE_SUPABASE_ANON_KEY is not set or is empty.');
+}
+
+console.log('Supabase config (runtime):', { supabaseUrl, supabaseAnonKey: '***' });
+
+if (!supabaseUrl.startsWith('http://') && !supabaseUrl.startsWith('https://')) {
+  throw new Error(`Invalid Supabase URL (must start with http:// or https://): ${supabaseUrl}`);
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
