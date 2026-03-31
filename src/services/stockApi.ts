@@ -1,3 +1,6 @@
+// Fixed Stock API - uses Yahoo Finance via a CORS proxy (allorigins.win)
+// This avoids direct NSE CORS blocks while still getting real market data
+
 const FALLBACK_STOCK_DATA: Record<string, any> = {
   'RELIANCE': { price: 2875.45, change: 15.75, changePercent: 0.55, volume: 2347890 },
   'TCS': { price: 3421.30, change: -23.45, changePercent: -0.68, volume: 1250680 },
@@ -14,6 +17,23 @@ const FALLBACK_STOCK_DATA: Record<string, any> = {
   'ASIANPAINT.B': { price: 3012.35, change: 34.50, changePercent: 1.16, volume: 876540 }
 };
 
+// Yahoo Finance symbol mapping for Indian stocks
+const YAHOO_SYMBOL_MAP: Record<string, string> = {
+  'RELIANCE': 'RELIANCE.NS',
+  'TCS': 'TCS.NS',
+  'HDFCBANK': 'HDFCBANK.NS',
+  'ICICIBANK': 'ICICIBANK.NS',
+  'INFY': 'INFY.NS',
+  'TATASTEEL': 'TATASTEEL.NS',
+  'SBIN': 'SBIN.NS',
+  'BAJAJAUTO': 'BAJAJAUTO.NS',
+  'HINDUNILVR': 'HINDUNILVR.NS',
+  'LT': 'LT.NS',
+  'TATAMOTORS.B': 'TATAMOTORS.BO',
+  'BHARTIARTL.B': 'BHARTIARTL.BO',
+  'ASIANPAINT.B': 'ASIANPAINT.BO',
+};
+
 const FALLBACK_INDEX_DATA = [
   { name: 'NIFTY 50', value: 19425.33, change: 156.78, changePercent: 0.81 },
   { name: 'SENSEX', value: 64718.56, change: 445.87, changePercent: 0.69 },
@@ -27,6 +47,7 @@ export interface StockQuote {
   changePercent: number;
   volume: number;
   lastUpdated: string;
+  isLive: boolean;
 }
 
 export interface MarketIndex {
@@ -38,18 +59,21 @@ export interface MarketIndex {
 
 class StockApiService {
   private cache = new Map<string, { data: any; timestamp: number }>();
-  private readonly CACHE_DURATION = 60000;
+  private readonly CACHE_DURATION = 30000; // 30 seconds for live data
+  private readonly STALE_DURATION = 300000; // 5 minutes for stale fallback
 
   private isMarketOpen(): boolean {
     const now = new Date();
+    // IST = UTC + 5:30
     const istOffset = 5.5 * 60 * 60 * 1000;
     const istTime = new Date(now.getTime() + istOffset);
     const currentHour = istTime.getUTCHours();
     const currentMinute = istTime.getUTCMinutes();
     const currentTime = currentHour * 60 + currentMinute;
-    const marketOpen = 9 * 60 + 15;
-    const marketClose = 15 * 60 + 30;
-    return currentTime >= marketOpen && currentTime < marketClose;
+    const marketOpen = 9 * 60 + 15;   // 9:15 AM IST
+    const marketClose = 15 * 60 + 30; // 3:30 PM IST
+    const dayOfWeek = istTime.getUTCDay(); // 0=Sun, 6=Sat
+    return dayOfWeek >= 1 && dayOfWeek <= 5 && currentTime >= marketOpen && currentTime < marketClose;
   }
 
   private getCachedData(key: string): any | null {
@@ -64,6 +88,10 @@ class StockApiService {
     this.cache.set(key, { data, timestamp: Date.now() });
   }
 
+  /**
+   * Fetch a single stock quote from Yahoo Finance via allorigins CORS proxy.
+   * Yahoo Finance v8 quoteSummary endpoint returns price data reliably.
+   */
   async getStockQuote(symbol: string): Promise<StockQuote> {
     const cacheKey = `quote_${symbol}`;
     const cached = this.getCachedData(cacheKey);
@@ -72,119 +100,142 @@ class StockApiService {
       return cached;
     }
 
-    console.log(`🔄 Fetching real-time data from NSE for ${symbol}...`);
+    const yahooSymbol = YAHOO_SYMBOL_MAP[symbol] || `${symbol}.NS`;
 
     try {
-      const nseSymbol = symbol.replace('.B', '');
-      const apiUrl = `https://www.nseindia.com/api/quote-equity?symbol=${nseSymbol}`;
+      console.log(`📡 Fetching live quote for ${symbol} (${yahooSymbol}) from Yahoo Finance...`);
 
-      console.log(`📡 NSE API Request: ${nseSymbol}`);
+      // Yahoo Finance v8 quoteSummary — modules=price gives us what we need
+      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=1d&range=1d`;
+      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
 
-      const response = await fetch(apiUrl, {
-        headers: {
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+      const response = await fetch(proxyUrl, {
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(8000), // 8 second timeout
       });
 
       if (!response.ok) {
-        console.error(`❌ NSE API request failed with status: ${response.status}`);
-        throw new Error(`API request failed: ${response.status}`);
+        throw new Error(`Proxy request failed: ${response.status}`);
       }
 
-      const data = await response.json();
-      console.log(`📊 NSE API Response for ${symbol}:`, data);
+      const proxyData = await response.json();
 
-      const priceData = data.priceInfo || {};
-      const stockQuote: StockQuote = {
+      if (!proxyData.contents) {
+        throw new Error('Empty proxy response');
+      }
+
+      const data = JSON.parse(proxyData.contents);
+      const result = data?.chart?.result?.[0];
+
+      if (!result) {
+        throw new Error('No chart result in Yahoo response');
+      }
+
+      const meta = result.meta;
+      const price = meta.regularMarketPrice ?? meta.previousClose;
+      const previousClose = meta.chartPreviousClose ?? meta.previousClose;
+      const change = price - previousClose;
+      const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+      const volume = meta.regularMarketVolume ?? 0;
+
+      const quote: StockQuote = {
         symbol,
-        price: priceData.lastPrice || 0,
-        change: priceData.change || 0,
-        changePercent: priceData.pChange || 0,
-        volume: data.preOpenMarket?.totalTradedVolume || 0,
-        lastUpdated: new Date().toISOString()
+        price,
+        change,
+        changePercent,
+        volume,
+        lastUpdated: new Date().toISOString(),
+        isLive: true,
       };
 
-      console.log(`✅ Successfully fetched NSE data for ${symbol}:`, stockQuote);
-      this.setCachedData(cacheKey, stockQuote);
-      return stockQuote;
+      console.log(`✅ Live data for ${symbol}: ₹${price.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`);
+      this.setCachedData(cacheKey, quote);
+      return quote;
+
     } catch (error) {
-      console.warn(`❌ Failed to fetch NSE data for ${symbol}, using fallback:`, error);
+      console.warn(`⚠️ Live fetch failed for ${symbol}, using fallback:`, error);
       return this.getFallbackData(symbol);
     }
   }
 
+  /**
+   * Fetch multiple quotes with controlled concurrency (3 at a time).
+   */
   async getMultipleQuotes(symbols: string[]): Promise<StockQuote[]> {
-    console.log('🔄 Fetching multiple quotes from NSE for symbols:', symbols);
+    console.log(`🔄 Fetching live quotes for ${symbols.length} symbols...`);
 
-    const quotes: StockQuote[] = [];
+    const BATCH_SIZE = 3;
+    const results: StockQuote[] = [];
 
-    for (const symbol of symbols) {
-      try {
-        console.log(`🔄 Processing symbol ${symbols.indexOf(symbol) + 1}/${symbols.length}: ${symbol}`);
-        const quote = await this.getStockQuote(symbol);
-        quotes.push(quote);
+    for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+      const batch = symbols.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map(symbol => this.getStockQuote(symbol).catch(() => this.getFallbackData(symbol)))
+      );
+      results.push(...batchResults);
 
-        if (symbols.indexOf(symbol) < symbols.length - 1) {
-          console.log('⏳ Waiting 1 second before next API call...');
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      } catch (error) {
-        console.error(`❌ Failed to fetch quote for ${symbol}:`, error);
-        quotes.push(this.getFallbackData(symbol));
+      // Small delay between batches to avoid rate limiting
+      if (i + BATCH_SIZE < symbols.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
 
-    console.log(`✅ Successfully fetched ${quotes.length} out of ${symbols.length} quotes`);
-    return quotes;
+    const liveCount = results.filter(q => q.isLive).length;
+    console.log(`✅ Fetched ${results.length} quotes (${liveCount} live, ${results.length - liveCount} fallback)`);
+    return results;
   }
 
+  /**
+   * Fetch market index data (Nifty 50 and Sensex) from Yahoo Finance.
+   */
   async getMarketIndices(): Promise<MarketIndex[]> {
     const cacheKey = 'market_indices';
     const cached = this.getCachedData(cacheKey);
     if (cached) return cached;
 
-    try {
-      console.log('🔄 Fetching market indices from NSE...');
-      const response = await fetch('https://www.nseindia.com/api/allIndices', {
-        headers: {
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-      });
+    const indexSymbols = [
+      { yahoo: '%5ENSEI', name: 'NIFTY 50' },
+      { yahoo: '%5EBSESN', name: 'SENSEX' },
+    ];
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch indices');
+    const indices: MarketIndex[] = [];
+
+    for (const idx of indexSymbols) {
+      try {
+        const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${idx.yahoo}?interval=1d&range=1d`;
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
+
+        const response = await fetch(proxyUrl, {
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(6000),
+        });
+
+        if (!response.ok) throw new Error(`Status ${response.status}`);
+
+        const proxyData = await response.json();
+        const data = JSON.parse(proxyData.contents);
+        const meta = data?.chart?.result?.[0]?.meta;
+
+        if (!meta) throw new Error('No meta in response');
+
+        const price = meta.regularMarketPrice ?? meta.previousClose;
+        const prevClose = meta.chartPreviousClose ?? meta.previousClose;
+        const change = price - prevClose;
+
+        indices.push({
+          name: idx.name,
+          value: price,
+          change,
+          changePercent: prevClose > 0 ? (change / prevClose) * 100 : 0,
+        });
+      } catch (err) {
+        console.warn(`Failed to fetch index ${idx.name}:`, err);
       }
-
-      const data = await response.json();
-      const indices: MarketIndex[] = [];
-
-      const indexNames = ['NIFTY 50', 'NIFTY BANK'];
-      for (const indexData of data.data || []) {
-        if (indexNames.includes(indexData.index)) {
-          indices.push({
-            name: indexData.index,
-            value: indexData.last || 0,
-            change: indexData.change || 0,
-            changePercent: indexData.percentChange || 0
-          });
-        }
-      }
-
-      if (indices.length > 0) {
-        console.log('✅ Successfully fetched NSE indices:', indices);
-        this.setCachedData(cacheKey, indices);
-        return indices;
-      }
-
-      throw new Error('No index data found');
-    } catch (error) {
-      console.warn('❌ Failed to fetch market indices from NSE, using fallback:', error);
-      return FALLBACK_INDEX_DATA;
     }
+
+    const result = indices.length > 0 ? indices : FALLBACK_INDEX_DATA;
+    this.setCachedData(cacheKey, result);
+    return result;
   }
 
   clearCache(): void {
@@ -203,24 +254,26 @@ class StockApiService {
       const minutesUntilClose = closeTime - currentTime;
       return {
         isOpen: true,
-        nextChange: `Market closes in ${Math.floor(minutesUntilClose / 60)}h ${minutesUntilClose % 60}m`
+        nextChange: `Market closes in ${Math.floor(minutesUntilClose / 60)}h ${minutesUntilClose % 60}m`,
       };
     } else {
       const openTime = 9 * 60 + 15;
-      let minutesUntilOpen;
+      let minutesUntilOpen = currentTime < openTime
+        ? openTime - currentTime
+        : (24 * 60) - currentTime + openTime;
 
-      if (currentTime < openTime) {
-        minutesUntilOpen = openTime - currentTime;
-      } else {
-        minutesUntilOpen = (24 * 60) - currentTime + openTime;
-      }
+      const dayOfWeek = istTime.getUTCDay();
+      if (dayOfWeek === 6) minutesUntilOpen += 2 * 24 * 60; // Saturday → Monday
+      if (dayOfWeek === 0) minutesUntilOpen += 24 * 60;      // Sunday → Monday
 
       const hours = Math.floor(minutesUntilOpen / 60);
       const minutes = minutesUntilOpen % 60;
 
       return {
         isOpen: false,
-        nextChange: hours > 12 ? 'Market opens tomorrow at 9:15 AM IST' : `Market opens in ${hours}h ${minutes}m`
+        nextChange: hours > 20
+          ? 'Market opens next trading day at 9:15 AM IST'
+          : `Market opens in ${hours}h ${minutes}m`,
       };
     }
   }
@@ -228,28 +281,29 @@ class StockApiService {
   private getFallbackData(symbol: string): StockQuote {
     const fallback = FALLBACK_STOCK_DATA[symbol];
     if (fallback) {
-      const variation = (Math.random() - 0.5) * 0.02;
+      // Use a seeded-like deterministic variation based on date to avoid wild swings
+      const seed = new Date().getDate() + new Date().getHours();
+      const variation = ((seed % 10) - 5) / 1000; // Very small ±0.5%
       const newPrice = fallback.price * (1 + variation);
       const change = newPrice - fallback.price;
-      const changePercent = (change / fallback.price) * 100;
-
       return {
         symbol,
         price: newPrice,
         change,
-        changePercent,
+        changePercent: (change / fallback.price) * 100,
         volume: fallback.volume,
-        lastUpdated: new Date().toISOString()
+        lastUpdated: new Date().toISOString(),
+        isLive: false,
       };
     }
-
     return {
       symbol,
-      price: 1000 + Math.random() * 2000,
-      change: (Math.random() - 0.5) * 100,
-      changePercent: (Math.random() - 0.5) * 5,
-      volume: Math.floor(Math.random() * 1000000) + 500000,
-      lastUpdated: new Date().toISOString()
+      price: 1000,
+      change: 0,
+      changePercent: 0,
+      volume: 500000,
+      lastUpdated: new Date().toISOString(),
+      isLive: false,
     };
   }
 }

@@ -324,7 +324,7 @@ export const HomePage: React.FC = () => {
           }
         }
         @keyframes fadeInScroll {
-          from { opacity: 0; transform: translateY(100px); }
+          from { opacity: 0; transform: translateY(70px); }
           to { opacity: 1; transform: translateY(0); }
         }
         @keyframes chartGrow {

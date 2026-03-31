@@ -1,26 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, TrendingUp, TrendingDown, ChevronRight, Clock, Lock } from 'lucide-react';
+import {
+  Search, Filter, TrendingUp, TrendingDown, ChevronRight,
+  Clock, Lock, Activity, Wifi, WifiOff,
+} from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
 import { Stock, Market } from '../types';
 import { useNavigate } from 'react-router-dom';
 import { stockApi } from '../services/stockApi';
-
-const getMarketStatus = () => {
-  const now = new Date();
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
-  const currentTime = currentHour * 60 + currentMinute;
-  
-  const marketOpen = 9 * 60; // 9:00 AM
-  const marketClose = 15 * 60 + 30; // 3:30 PM
-  
-  return {
-    isOpen: currentTime >= marketOpen && currentTime < marketClose,
-    openTime: marketOpen,
-    closeTime: marketClose,
-    currentTime
-  };
-};
+import { NewsSentimentPanel } from '../components/NewsSentimentPanel';
 
 export const StockSelectionPage: React.FC = () => {
   const { stocks, selectedStocks, selectStock, unselectStock, isDarkMode, isLoading } = useAppContext();
@@ -29,385 +16,282 @@ export const StockSelectionPage: React.FC = () => {
   const [sectorFilter, setSectorFilter] = useState<string | 'ALL'>('ALL');
   const [marketIndices, setMarketIndices] = useState<any[]>([]);
   const navigate = useNavigate();
-  
   const marketStatus = stockApi.getMarketStatus();
 
-  // Load market indices
   useEffect(() => {
-    const loadMarketIndices = async () => {
-      try {
-        const indices = await stockApi.getMarketIndices();
-        setMarketIndices(indices);
-      } catch (error) {
-        console.error('Failed to load market indices:', error);
-      }
-    };
-    
-    loadMarketIndices();
+    stockApi.getMarketIndices().then(setMarketIndices).catch(console.error);
   }, []);
-  // Get unique sectors for filtering
-  const sectors = ['ALL', ...new Set(stocks.map(stock => stock.sector).filter(Boolean))];
 
-  // Enhanced search functionality
+  const sectors = ['ALL', ...new Set(stocks.map(s => s.sector).filter(Boolean))];
+
   const filteredStocks = stocks.filter(stock => {
-    const searchLower = searchTerm.toLowerCase();
-    const matchesSearch = 
-      stock.symbol.toLowerCase().includes(searchLower) || 
-      stock.name.toLowerCase().includes(searchLower) ||
-      (stock.sector && stock.sector.toLowerCase().includes(searchLower));
-    
-    const matchesMarket = marketFilter === 'ALL' || stock.market === marketFilter;
-    const matchesSector = sectorFilter === 'ALL' || stock.sector === sectorFilter;
-    
-    return matchesSearch && matchesMarket && matchesSector;
+    const q = searchTerm.toLowerCase();
+    return (
+      (stock.symbol.toLowerCase().includes(q) ||
+        stock.name.toLowerCase().includes(q) ||
+        (stock.sector?.toLowerCase().includes(q) ?? false)) &&
+      (marketFilter === 'ALL' || stock.market === marketFilter) &&
+      (sectorFilter === 'ALL' || stock.sector === sectorFilter)
+    );
   });
 
-  const isSelected = (symbol: string) => selectedStocks.some(stock => stock.symbol === symbol);
-
-  const handleSelectStock = (stock: Stock) => {
-    if (isSelected(stock.symbol)) {
-      unselectStock(stock.symbol);
-    } else {
-      selectStock(stock);
-    }
-  };
-
-  const handleContinue = () => {
-    if (selectedStocks.length > 0) {
-      navigate('/strategies');
-    }
-  };
-
-  // Search suggestions based on current stocks
-  const getSearchSuggestions = () => {
-    if (searchTerm.length === 0) return [];
-    
-    const suggestions = [];
-    const searchLower = searchTerm.toLowerCase();
-    
-    // Add matching symbols
-    const matchingSymbols = stocks
-      .filter(stock => stock.symbol.toLowerCase().includes(searchLower))
-      .slice(0, 3)
-      .map(stock => ({ type: 'symbol', value: stock.symbol, label: `${stock.symbol} - ${stock.name}` }));
-    
-    // Add matching sectors
-    const matchingSectors = sectors
-      .filter(sector => sector !== 'ALL' && sector.toLowerCase().includes(searchLower))
-      .slice(0, 2)
-      .map(sector => ({ type: 'sector', value: sector, label: `${sector} sector` }));
-    
-    return [...matchingSymbols, ...matchingSectors];
-  };
-
-  const searchSuggestions = getSearchSuggestions();
+  const isSelected = (symbol: string) => selectedStocks.some(s => s.symbol === symbol);
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="mb-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className={`text-3xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-              Stock Selection
-            </h1>
-            <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-              Choose stocks from NSE and BSE to analyze and trade.
-            </p>
-          </div>
-          <div className={`flex items-center px-4 py-2 rounded-md ${
-            marketStatus.isOpen 
-              ? isDarkMode ? 'bg-emerald-900/20 text-emerald-400' : 'bg-emerald-100 text-emerald-700'
-              : isDarkMode ? 'bg-red-900/20 text-red-400' : 'bg-red-100 text-red-700'
-          }`}>
-            {marketStatus.isOpen ? (
-              <Clock size={20} className="mr-2" />
-            ) : (
-              <Lock size={20} className="mr-2" />
-            )}
-            <span className="font-medium">
-              {marketStatus.isOpen ? 'Market Open' : 'Market Closed'}
-            </span>
-          </div>
+    <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
+      {/* Page header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'Space Grotesk' }}>
+            Stock Selection
+          </h1>
+          <p className="text-gray-400 text-sm mt-1">
+            Choose NSE & BSE stocks to analyse and trade.
+          </p>
+        </div>
+
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border ${
+          marketStatus.isOpen
+            ? 'bg-emerald-900/20 text-emerald-400 border-emerald-500/20'
+            : 'bg-gray-800/60 text-gray-400 border-gray-700/50'
+        }`}>
+          {marketStatus.isOpen ? (
+            <><Activity size={13} className="animate-pulse" /> Market Live</>
+          ) : (
+            <><Lock size={13} /> Market Closed</>
+          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2">
-          <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center space-y-4 sm:space-y-0 sm:space-x-4">
-            <div className="relative flex-1 w-full">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search size={18} className="text-gray-400" />
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* ── Stock table ── */}
+        <div className="lg:col-span-2 space-y-4">
+          {/* Filters */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
               <input
                 type="text"
-                className={`py-2.5 pl-10 pr-4 block w-full border-none rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                  isDarkMode ? 'bg-gray-700 text-white' : 'bg-white text-gray-900'
-                }`}
-                placeholder="Search by ticker (RELIANCE), company (Tata Motors), or sector (Banking)..."
+                className="w-full pl-9 pr-4 py-2.5 bg-gray-800/60 border border-gray-700/50 rounded-xl text-sm text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50 focus:bg-gray-800 transition-all"
+                placeholder="Search by ticker, company, or sector…"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={e => setSearchTerm(e.target.value)}
               />
-              
-              {/* Search Suggestions */}
-              {searchTerm.length > 0 && searchSuggestions.length > 0 && (
-                <div className={`absolute top-full left-0 right-0 mt-1 rounded-md shadow-lg z-50 ${
-                  isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
-                }`}>
-                  <div className="p-2">
-                    {searchSuggestions.map((suggestion, index) => (
-                      <div
-                        key={index}
-                        className={`px-3 py-2 cursor-pointer rounded-md ${
-                          isDarkMode ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-700'
-                        }`}
-                        onClick={() => {
-                          if (suggestion.type === 'symbol') {
-                            setSearchTerm(suggestion.value);
-                          } else if (suggestion.type === 'sector') {
-                            setSectorFilter(suggestion.value);
-                            setSearchTerm('');
-                          }
-                        }}
-                      >
-                        <div className="flex items-center">
-                          <Search size={14} className="mr-2 text-gray-400" />
-                          <span className="text-sm">{suggestion.label}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
-            <div className="flex items-center space-x-4 w-full sm:w-auto">
-              <select
-                className={`py-2.5 pl-3 pr-10 border-none rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                  isDarkMode ? 'bg-gray-700 text-white' : 'bg-white text-gray-900'
-                }`}
-                value={marketFilter}
-                onChange={(e) => setMarketFilter(e.target.value as Market | 'ALL')}
-              >
-                <option value="ALL">All Markets</option>
-                <option value="NSE">NSE</option>
-                <option value="BSE">BSE</option>
-              </select>
-              <select
-                className={`py-2.5 pl-3 pr-10 border-none rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                  isDarkMode ? 'bg-gray-700 text-white' : 'bg-white text-gray-900'
-                }`}
-                value={sectorFilter}
-                onChange={(e) => setSectorFilter(e.target.value)}
-              >
-                {sectors.map((sector) => (
-                  <option key={sector} value={sector}>
-                    {sector === 'ALL' ? 'All Sectors' : sector}
-                  </option>
-                ))}
-              </select>
-              <button
-                className={`p-2.5 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
-                  isDarkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-white text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <Filter size={18} />
-              </button>
-            </div>
+            <select
+              className="px-3 py-2.5 bg-gray-800/60 border border-gray-700/50 rounded-xl text-sm text-gray-200 focus:outline-none focus:border-emerald-500/50 transition-all"
+              value={marketFilter}
+              onChange={e => setMarketFilter(e.target.value as Market | 'ALL')}
+            >
+              <option value="ALL">All Markets</option>
+              <option value="NSE">NSE</option>
+              <option value="BSE">BSE</option>
+            </select>
+            <select
+              className="px-3 py-2.5 bg-gray-800/60 border border-gray-700/50 rounded-xl text-sm text-gray-200 focus:outline-none focus:border-emerald-500/50 transition-all"
+              value={sectorFilter}
+              onChange={e => setSectorFilter(e.target.value)}
+            >
+              {sectors.map(s => (
+                <option key={s} value={s}>{s === 'ALL' ? 'All Sectors' : s}</option>
+              ))}
+            </select>
           </div>
 
-          {isLoading ? (
-            <div className={`p-12 rounded-lg flex justify-center items-center ${isDarkMode ? 'bg-gray-800' : 'bg-white shadow'}`}>
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
-            </div>
-          ) : (
-            <div className={`rounded-lg overflow-hidden ${isDarkMode ? 'bg-gray-800' : 'bg-white shadow'}`}>
+          {/* Table */}
+          <div className="rounded-xl bg-gray-800/60 border border-gray-700/50 overflow-hidden">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <div className="spinner" />
+              </div>
+            ) : (
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-700">
-                  <thead className={isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}>
-                    <tr>
-                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium ${isDarkMode ? 'text-gray-300 uppercase tracking-wider' : 'text-gray-500 uppercase tracking-wider'}`}>
-                        Symbol
-                      </th>
-                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium ${isDarkMode ? 'text-gray-300 uppercase tracking-wider' : 'text-gray-500 uppercase tracking-wider'}`}>
-                        Name
-                      </th>
-                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium ${isDarkMode ? 'text-gray-300 uppercase tracking-wider' : 'text-gray-500 uppercase tracking-wider'}`}>
-                        Price
-                      </th>
-                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium ${isDarkMode ? 'text-gray-300 uppercase tracking-wider' : 'text-gray-500 uppercase tracking-wider'}`}>
-                        Change
-                      </th>
-                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium ${isDarkMode ? 'text-gray-300 uppercase tracking-wider' : 'text-gray-500 uppercase tracking-wider'}`}>
-                        Market
-                      </th>
-                      <th scope="col" className={`px-6 py-3 text-left text-xs font-medium ${isDarkMode ? 'text-gray-300 uppercase tracking-wider' : 'text-gray-500 uppercase tracking-wider'}`}>
-                        Action
-                      </th>
+                <table className="min-w-full">
+                  <thead>
+                    <tr className="border-b border-gray-700/50 bg-gray-800/40">
+                      {['Symbol', 'Company', 'Price', '% Change', 'Market', ''].map(h => (
+                        <th
+                          key={h}
+                          className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider"
+                        >
+                          {h}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
-                  <tbody className={`divide-y ${isDarkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
-                    {filteredStocks.map((stock) => (
-                      <tr key={stock.symbol} className={`
-                        ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'} 
-                        transition-colors
-                        ${isSelected(stock.symbol) ? (isDarkMode ? 'bg-gray-700' : 'bg-emerald-50') : ''}
-                      `}>
-                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                          {stock.symbol}
-                        </td>
-                        <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                          {stock.name}
-                        </td>
-                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                          ₹{stock.price.toFixed(2)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          <div className="flex items-center">
-                            {stock.change >= 0 ? (
-                              <TrendingUp size={16} className="mr-1 text-emerald-500" />
-                            ) : (
-                              <TrendingDown size={16} className="mr-1 text-red-500" />
-                            )}
-                            <span className={stock.change >= 0 ? 'text-emerald-500' : 'text-red-500'}>
-                              {stock.change > 0 ? '+' : ''}{stock.change.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
+                  <tbody className="divide-y divide-gray-700/30">
+                    {filteredStocks.map(stock => {
+                      const sel = isSelected(stock.symbol);
+                      return (
+                        <tr
+                          key={stock.symbol}
+                          className={`tr-hover transition-colors ${sel ? 'bg-emerald-900/10' : ''}`}
+                        >
+                          <td className="px-4 py-3">
+                            <span className="text-sm font-bold text-white font-mono">
+                              {stock.symbol}
                             </span>
-                          </div>
-                        </td>
-                        <td className={`px-6 py-4 whitespace-nowrap text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                          {stock.market}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          <button
-                            onClick={() => handleSelectStock(stock)}
-                            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                              isSelected(stock.symbol)
-                                ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                                : 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'
-                            }`}
-                          >
-                            {isSelected(stock.symbol) ? 'Remove' : 'Select'}
-                          </button>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div>
+                              <p className="text-sm text-gray-200">{stock.name}</p>
+                              {stock.sector && (
+                                <p className="text-xs text-gray-500">{stock.sector}</p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-sm font-semibold text-white font-mono">
+                              ₹{stock.price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className={`flex items-center gap-1 text-sm font-medium ${
+                              stock.change >= 0 ? 'text-emerald-400' : 'text-red-400'
+                            }`}>
+                              {stock.change >= 0
+                                ? <TrendingUp size={13} />
+                                : <TrendingDown size={13} />
+                              }
+                              {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-xs px-2 py-1 rounded-lg bg-gray-700/60 text-gray-300 font-medium">
+                              {stock.market}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => sel ? unselectStock(stock.symbol) : selectStock(stock)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
+                                sel
+                                  ? 'bg-red-900/30 text-red-400 border border-red-500/30 hover:bg-red-900/50'
+                                  : 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-900/50'
+                              }`}
+                            >
+                              {sel ? 'Remove' : 'Select'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {filteredStocks.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-16 text-center text-gray-500 text-sm">
+                          No stocks match your filters
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        <div className="lg:col-span-1">
-          <div className={`rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white shadow'} mb-6`}>
-            <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-              <h2 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                Selected Stocks ({selectedStocks.length})
+        {/* ── Right column ── */}
+        <div className="space-y-4">
+          {/* Selected stocks */}
+          <div className="rounded-xl bg-gray-800/60 border border-gray-700/50 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700/50">
+              <h2 className="text-sm font-semibold text-white">
+                Selected ({selectedStocks.length})
               </h2>
-            </div>
-            <div className="p-4">
-              {selectedStocks.length === 0 ? (
-                <div className={`text-center py-6 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  <p>No stocks selected</p>
-                  <p className="mt-2 text-sm">
-                    Select stocks from the list to add them here.
-                  </p>
-                </div>
-              ) : (
-                <div className={`space-y-3 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
-                  {selectedStocks.map((stock) => (
-                    <div
-                      key={stock.symbol}
-                      className={`flex items-center justify-between p-3 rounded-md ${isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}`}
-                    >
-                      <div>
-                        <div className="font-medium">{stock.symbol}</div>
-                        <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>{stock.name}</div>
-                        <div className={`text-xs ${stock.change >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                          ₹{stock.price.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => unselectStock(stock.symbol)}
-                        className={`p-1 rounded-full ${isDarkMode ? 'hover:bg-gray-600' : 'hover:bg-gray-200'}`}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
+              {selectedStocks.length > 0 && (
+                <button
+                  onClick={() => selectedStocks.forEach(s => unselectStock(s.symbol))}
+                  className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+                >
+                  Clear all
+                </button>
               )}
             </div>
-            <div className="px-4 py-3 flex justify-between items-center">
+
+            <div className="p-3 space-y-2 max-h-56 overflow-y-auto custom-scrollbar">
+              {selectedStocks.length === 0 ? (
+                <p className="text-xs text-gray-500 text-center py-6">
+                  Click "Select" on any stock to add it here
+                </p>
+              ) : (
+                selectedStocks.map(stock => (
+                  <div
+                    key={stock.symbol}
+                    className="flex items-center justify-between p-2.5 rounded-lg bg-gray-700/40 hover:bg-gray-700/60 transition-colors"
+                  >
+                    <div>
+                      <p className="text-sm font-bold text-white">{stock.symbol}</p>
+                      <p className="text-xs text-gray-400">₹{stock.price.toFixed(2)}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-medium ${
+                        stock.changePercent >= 0 ? 'text-emerald-400' : 'text-red-400'
+                      }`}>
+                        {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                      </span>
+                      <button
+                        onClick={() => unselectStock(stock.symbol)}
+                        className="text-gray-500 hover:text-red-400 transition-colors text-lg leading-none"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-3 border-t border-gray-700/50">
               <button
-                className={`px-4 py-2 rounded text-sm font-medium ${isDarkMode ? 'text-gray-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'}`}
-                onClick={() => selectedStocks.forEach(stock => unselectStock(stock.symbol))}
+                onClick={() => navigate('/strategies')}
                 disabled={selectedStocks.length === 0}
-              >
-                Clear All
-              </button>
-              <button
-                onClick={handleContinue}
-                className={`px-4 py-2 rounded-md flex items-center ${
+                className={`w-full py-2 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold transition-all duration-200 ${
                   selectedStocks.length > 0
-                    ? `${isDarkMode ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-emerald-600 hover:bg-emerald-700'} text-white`
-                    : `${isDarkMode ? 'bg-gray-700' : 'bg-gray-300'} cursor-not-allowed ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`
+                    ? 'btn-primary'
+                    : 'bg-gray-700/50 text-gray-500 cursor-not-allowed'
                 }`}
-                disabled={selectedStocks.length === 0}
               >
-                Continue
-                <ChevronRight size={16} className="ml-1" />
+                Continue to Strategies
+                <ChevronRight size={15} />
               </button>
             </div>
           </div>
 
-          <div className={`rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white shadow'}`}>
-            <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-              <h2 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                Market Information
-              </h2>
-            </div>
-            <div className="p-4">
-              <div className={`space-y-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
-                <div>
-                  <h3 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>NSE</h3>
-                  {marketIndices.filter(index => index.name.includes('NIFTY')).map((index, i) => (
-                    <div key={i} className="flex justify-between mt-1">
-                      <span>{index.name}</span>
-                      <span className={index.change >= 0 ? 'text-emerald-500' : 'text-red-500'}>
-                        {index.value.toLocaleString()} ({index.change >= 0 ? '+' : ''}{index.changePercent.toFixed(2)}%)
-                      </span>
-                    </div>
-                  ))}
+          {/* Market info */}
+          <div className="rounded-xl bg-gray-800/60 border border-gray-700/50 p-4 space-y-3">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              Market Indices
+            </h3>
+            {(marketIndices.length > 0 ? marketIndices : [
+              { name: 'NIFTY 50', value: 19425, change: 156, changePercent: 0.81 },
+              { name: 'SENSEX', value: 64718, change: 445, changePercent: 0.69 },
+            ]).map(idx => (
+              <div key={idx.name} className="flex items-center justify-between">
+                <span className="text-sm text-gray-300">{idx.name}</span>
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-white font-mono">
+                    {idx.value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  </p>
+                  <p className={`text-xs ${idx.changePercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {idx.changePercent >= 0 ? '+' : ''}{idx.changePercent.toFixed(2)}%
+                  </p>
                 </div>
-                <div>
-                  <h3 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>BSE</h3>
-                  {marketIndices.filter(index => index.name.includes('SENSEX')).map((index, i) => (
-                    <div key={i} className="flex justify-between mt-1">
-                      <span>{index.name}</span>
-                      <span className={index.change >= 0 ? 'text-emerald-500' : 'text-red-500'}>
-                        {index.value.toLocaleString()} ({index.change >= 0 ? '+' : ''}{index.changePercent.toFixed(2)}%)
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div>
-                  <h3 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>Market Status</h3>
-                  <div className={`p-2 rounded ${isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
-                    <div className="flex items-center">
-                      <div className={`h-2.5 w-2.5 rounded-full mr-2 ${
-                        marketStatus.isOpen ? 'bg-emerald-500' : 'bg-red-500'
-                      }`}></div>
-                      <span>{marketStatus.isOpen ? 'Market Open' : 'Market Closed'}</span>
-                    </div>
-                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                      {marketStatus.nextChange}
-                    </div>
-                  </div>
-                </div>
+              </div>
+            ))}
+
+            <div className="pt-2 border-t border-gray-700/40">
+              <div className="flex items-center gap-2">
+                <span className={`live-dot ${!marketStatus.isOpen ? 'bg-gray-500' : ''}`}
+                  style={marketStatus.isOpen ? {} : { background: '#6b7280' }}
+                />
+                <span className="text-xs text-gray-400">{marketStatus.nextChange}</span>
               </div>
             </div>
           </div>
+
+          {/* News Sentiment */}
+          <NewsSentimentPanel />
         </div>
       </div>
     </div>
