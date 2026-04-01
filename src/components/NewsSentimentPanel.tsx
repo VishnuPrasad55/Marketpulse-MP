@@ -315,21 +315,6 @@ export const NewsSentimentPanel: React.FC<NewsSentimentPanelProps> = ({ classNam
           </div>
         )}
       </div>
-
-      {/* Footer note */}
-      <div className="px-5 py-3 border-t border-gray-700/30 bg-gray-900/30">
-        <p className="text-xs text-gray-500">
-          💡 Add <code className="text-emerald-400">VITE_NEWSDATA_API_KEY</code> to .env for live news.{' '}
-          <a
-            href="https://newsdata.io"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-emerald-400 hover:underline"
-          >
-            Get free key →
-          </a>
-        </p>
-      </div>
     </div>
   );
 };
