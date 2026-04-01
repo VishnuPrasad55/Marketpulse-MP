@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Stock, Strategy, BacktestResult, TradingParameters } from '../types';
-import { getStocksWithRealTimeData } from '../data/mockStocks';
+import { getStocksWithRealTimeData, buildAllSeededStocks } from '../data/mockStocks';
 import { mockStrategies } from '../data/mockStrategies';
 import { useAuth } from '../hooks/useAuth';
 import { supabase, UserProfile, UserStock, UserStrategy, UserPrediction, UserPortfolio, TradingParametersDB } from '../lib/supabase';
@@ -99,17 +99,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         console.log('AppContext: Loaded stocks:', stocksData.length);
         setStocks(stocksData);
       } catch (error) {
-        console.error('AppContext: Failed to load stocks:', error);
-
-        // Try to load fallback data for quick recovery
-        try {
-          const fallbackData = await getStocksWithRealTimeData();
-          setStocks(fallbackData);
-          console.log('AppContext: Fallback stocks loaded:', fallbackData.length);
-        } catch (fallbackError) {
-          console.error('AppContext: Fallback also failed:', fallbackError);
-          setStocks([]);
-        }
+        // getStocksWithRealTimeData has its own internal catch, so this only
+        // fires in truly unexpected situations. Use the synchronous seeded
+        // fallback so the UI always has data to display.
+        console.error('AppContext: getStocksWithRealTimeData threw unexpectedly, applying seeded fallback:', error);
+        const fallbackData = buildAllSeededStocks();
+        setStocks(fallbackData);
+        console.log('AppContext: Seeded fallback applied —', fallbackData.length, 'stocks loaded');
       }
 
       setIsLoading(false);

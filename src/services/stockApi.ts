@@ -62,19 +62,27 @@ class StockApiService {
   }
 
   private async fetchViaProxy(url: string): Promise<any> {
-    for (const makeProxy of CORS_PROXIES) {
+    const proxyNames = ['allorigins.win', 'corsproxy.io', 'codetabs.com'];
+    for (let i = 0; i < CORS_PROXIES.length; i++) {
+      const makeProxy = CORS_PROXIES[i];
+      const proxyName = proxyNames[i];
       try {
         const proxyUrl = makeProxy(url);
+        console.debug(`🌐 [stockApi] Trying proxy ${proxyName} for ${url.slice(0, 60)}...`);
         const res = await fetch(proxyUrl, {
           headers: { Accept: 'application/json' },
           signal: AbortSignal.timeout(7000),
         });
-        if (!res.ok) continue;
+        if (!res.ok) {
+          console.warn(`⚠️ [stockApi] Proxy ${proxyName} returned HTTP ${res.status} — trying next`);
+          continue;
+        }
         const raw = await res.json();
         if (typeof raw?.contents === 'string') return JSON.parse(raw.contents);
         if (raw && typeof raw === 'object') return raw;
-      } catch {
-        // try next proxy
+        console.warn(`⚠️ [stockApi] Proxy ${proxyName} returned unexpected shape — trying next`);
+      } catch (err) {
+        console.warn(`⚠️ [stockApi] Proxy ${proxyName} failed:`, err instanceof Error ? err.message : err);
       }
     }
     throw new Error('All CORS proxies failed');
@@ -110,7 +118,8 @@ class StockApiService {
 
       this.setCache(`q_${symbol}`, quote);
       return quote;
-    } catch {
+    } catch (err) {
+      console.warn(`⚠️ [stockApi] Live fetch failed for ${symbol}, using seeded fallback:`, err instanceof Error ? err.message : err);
       return this.getFallback(symbol);
     }
   }
@@ -122,11 +131,16 @@ class StockApiService {
     for (let i = 0; i < symbols.length; i += BATCH) {
       const batch = symbols.slice(i, i + BATCH);
       const batchResults = await Promise.all(
-        batch.map(s => this.getStockQuote(s).catch(() => this.getFallback(s)))
+        batch.map(s => this.getStockQuote(s).catch((err) => {
+          console.warn(`⚠️ [stockApi] Falling back to seeded data for ${s}:`, err instanceof Error ? err.message : err);
+          return this.getFallback(s);
+        }))
       );
       results.push(...batchResults);
       if (i + BATCH < symbols.length) await new Promise(r => setTimeout(r, 300));
     }
+    const liveCount = results.filter(r => r.isLive).length;
+    console.log(`📊 [stockApi] getMultipleQuotes complete: ${liveCount}/${results.length} live, ${results.length - liveCount} seeded`);
     return results;
   }
 
