@@ -9,6 +9,7 @@ import { PredictionsPage } from './pages/PredictionsPage';
 import { TradingDashboardPage } from './pages/TradingDashboardPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AlgoEditorPage } from './pages/AlgoEditorPage';
+import { PaperTradingPage } from './pages/PaperTradingPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { AppProvider } from './context/AppContext';
 import { useAuth } from './hooks/useAuth';
@@ -40,6 +41,7 @@ function AppContent() {
           <Route path="backtesting" element={<BacktestingPage />} />
           <Route path="predictions" element={<PredictionsPage />} />
           <Route path="dashboard" element={<TradingDashboardPage />} />
+          <Route path="paper-trading" element={<PaperTradingPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
