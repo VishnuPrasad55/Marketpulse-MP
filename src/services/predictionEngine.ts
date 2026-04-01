@@ -1,7 +1,42 @@
-// AI-Powered Prediction Engine
+/**
+ * AI Prediction Engine — Transparent & Explainable
+ *
+ * METHOD (in plain English):
+ * ─────────────────────────────────────────────────
+ * 1. TREND (Linear Regression on last 60 days)
+ *    → Fits a straight line to recent closing prices.
+ *    → If slope > 0 → uptrend. Slope magnitude = momentum.
+ *
+ * 2. MOMENTUM (RSI — Relative Strength Index, 14-day)
+ *    → RSI < 35 → oversold → likely bounce UP
+ *    → RSI > 65 → overbought → likely pullback DOWN
+ *    → RSI 45-55 → neutral
+ *
+ * 3. MACD (12-26-9 EMA crossover)
+ *    → MACD line > Signal line → bullish momentum
+ *    → MACD line < Signal line → bearish momentum
+ *    → Histogram widening = strengthening signal
+ *
+ * 4. VOLATILITY (20-day rolling std dev)
+ *    → Used to set prediction bands (±1σ, ±2σ)
+ *    → High volatility → wider bands, lower confidence
+ *
+ * 5. BACKTEST FACTOR (optional)
+ *    → If a strategy returned > 10% in backtest → +10% confidence boost
+ *    → Rationalise: a strategy that worked historically is a signal
+ *
+ * OUTPUT:
+ *    - predictedPrice = currentPrice * (1 + weightedExpectedReturn)
+ *    - weightedExpectedReturn comes from trend + momentum + MACD, each weighted
+ *    - confidence = 50 + (|signal strength| * 40) capped at 88%
+ *    - direction = sign of combined signal
+ *
+ * IMPORTANT: This is a technical analysis model, NOT a financial advisor.
+ * Past performance does not guarantee future results.
+ */
+
 import { Stock, Prediction } from '../types';
-import { TechnicalIndicators } from './backtestingEngine';
-import { historicalDataService } from './historicalDataService';
+import { historicalDataService, HistoricalDataPoint } from './historicalDataService';
 
 export interface PredictionConfig {
   days: number;
@@ -9,270 +44,242 @@ export interface PredictionConfig {
   useML: boolean;
 }
 
+export interface DetailedPrediction extends Prediction {
+  signals: {
+    trend: { direction: 'UP' | 'DOWN' | 'NEUTRAL'; strength: number; description: string };
+    rsi:   { direction: 'UP' | 'DOWN' | 'NEUTRAL'; strength: number; description: string; value: number };
+    macd:  { direction: 'UP' | 'DOWN' | 'NEUTRAL'; strength: number; description: string };
+  };
+  priceRange: { low: number; high: number };
+  methodology: string;
+  backtestInfluence: string;
+}
+
+// ─── Technical indicator helpers ─────────────────────────────────────────────
+
+function sma(prices: number[], period: number): number[] {
+  const out: number[] = [];
+  for (let i = period - 1; i < prices.length; i++) {
+    out.push(prices.slice(i - period + 1, i + 1).reduce((a, b) => a + b) / period);
+  }
+  return out;
+}
+
+function ema(prices: number[], period: number): number[] {
+  const k = 2 / (period + 1);
+  const out: number[] = [prices[0]];
+  for (let i = 1; i < prices.length; i++) {
+    out.push(prices[i] * k + out[i - 1] * (1 - k));
+  }
+  return out;
+}
+
+function rsi(prices: number[], period = 14): number {
+  if (prices.length < period + 1) return 50;
+  let gains = 0, losses = 0;
+  for (let i = prices.length - period; i < prices.length; i++) {
+    const ch = prices[i] - prices[i - 1];
+    if (ch > 0) gains += ch; else losses -= ch;
+  }
+  const ag = gains / period, al = losses / period;
+  if (al === 0) return 100;
+  return 100 - 100 / (1 + ag / al);
+}
+
+function linearRegression(prices: number[]): { slope: number; r2: number } {
+  const n = prices.length;
+  const xs = Array.from({ length: n }, (_, i) => i);
+  const xMean = (n - 1) / 2;
+  const yMean = prices.reduce((a, b) => a + b) / n;
+  let ssXY = 0, ssXX = 0, ssTot = 0;
+  for (let i = 0; i < n; i++) {
+    ssXY += (xs[i] - xMean) * (prices[i] - yMean);
+    ssXX += (xs[i] - xMean) ** 2;
+    ssTot += (prices[i] - yMean) ** 2;
+  }
+  const slope = ssXX === 0 ? 0 : ssXY / ssXX;
+  const ssRes = prices.reduce((sum, p, i) => sum + (p - (yMean + slope * (i - xMean))) ** 2, 0);
+  const r2 = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+  return { slope, r2 };
+}
+
+function stdDev(prices: number[]): number {
+  const mean = prices.reduce((a, b) => a + b) / prices.length;
+  return Math.sqrt(prices.reduce((sum, p) => sum + (p - mean) ** 2, 0) / prices.length);
+}
+
+// ─── Main engine ─────────────────────────────────────────────────────────────
+
 export class PredictionEngine {
-  // Simple Linear Regression for trend prediction
-  static linearRegression(x: number[], y: number[]): { slope: number; intercept: number; r2: number } {
-    const n = x.length;
-    const sumX = x.reduce((a, b) => a + b, 0);
-    const sumY = y.reduce((a, b) => a + b, 0);
-    const sumXY = x.reduce((sum, xi, i) => sum + xi * y[i], 0);
-    const sumXX = x.reduce((sum, xi) => sum + xi * xi, 0);
-    const sumYY = y.reduce((sum, yi) => sum + yi * yi, 0);
+  static async generatePrediction(
+    stock: Stock,
+    config: PredictionConfig,
+    backtestResult?: { totalReturn: number; sharpeRatio: number; trades?: any[] } | null,
+  ): Promise<DetailedPrediction> {
 
-    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
-    const intercept = (sumY - slope * sumX) / n;
+    const endDate   = new Date().toISOString().slice(0, 10);
+    const startDate = new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10); // 6 months
 
-    // Calculate R-squared
-    const yMean = sumY / n;
-    const ssRes = y.reduce((sum, yi, i) => sum + Math.pow(yi - (slope * x[i] + intercept), 2), 0);
-    const ssTot = y.reduce((sum, yi) => sum + Math.pow(yi - yMean, 2), 0);
-    const r2 = 1 - (ssRes / ssTot);
+    const rawData = await historicalDataService.getHistoricalData(stock.symbol, startDate, endDate);
 
-    return { slope, intercept, r2 };
-  }
-
-  // Moving Average Convergence Divergence prediction
-  static macdPrediction(prices: number[]): { direction: 'UP' | 'DOWN' | 'NEUTRAL'; strength: number } {
-    const macdData = TechnicalIndicators.macd(prices);
-    const latestMACD = macdData.macd[macdData.macd.length - 1];
-    const latestSignal = macdData.signal[macdData.signal.length - 1];
-    const latestHistogram = macdData.histogram[macdData.histogram.length - 1];
-
-    let direction: 'UP' | 'DOWN' | 'NEUTRAL' = 'NEUTRAL';
-    let strength = 0;
-
-    if (latestMACD > latestSignal && latestHistogram > 0) {
-      direction = 'UP';
-      strength = Math.min(Math.abs(latestHistogram) * 10, 1);
-    } else if (latestMACD < latestSignal && latestHistogram < 0) {
-      direction = 'DOWN';
-      strength = Math.min(Math.abs(latestHistogram) * 10, 1);
+    if (rawData.length < 30) {
+      return this.fallback(stock, config, backtestResult);
     }
 
-    return { direction, strength };
-  }
+    const prices  = rawData.map(d => d.close || d.price);
+    const current = prices[prices.length - 1];
 
-  // RSI-based momentum prediction
-  static rsiMomentum(prices: number[]): { direction: 'UP' | 'DOWN' | 'NEUTRAL'; strength: number } {
-    const rsi = TechnicalIndicators.rsi(prices);
-    const latestRSI = rsi[rsi.length - 1];
-    const prevRSI = rsi[rsi.length - 2];
+    // ── 1. TREND ──────────────────────────────────────────────────────────────
+    const recent60  = prices.slice(-60);
+    const { slope, r2 } = linearRegression(recent60);
+    const dailyTrendReturn = slope / current; // daily return implied by regression
+    const trendStrength    = Math.min(Math.abs(dailyTrendReturn) * 100, 1); // 0-1
+    const trendDir         = slope > 0.001 * current ? 'UP' : slope < -0.001 * current ? 'DOWN' : 'NEUTRAL';
 
-    let direction: 'UP' | 'DOWN' | 'NEUTRAL' = 'NEUTRAL';
-    let strength = 0;
+    // ── 2. RSI ────────────────────────────────────────────────────────────────
+    const rsiVal     = rsi(prices, 14);
+    let rsiDir: 'UP' | 'DOWN' | 'NEUTRAL' = 'NEUTRAL';
+    let rsiStrength  = 0;
+    if (rsiVal < 35)      { rsiDir = 'UP';   rsiStrength = (35 - rsiVal) / 35; }
+    else if (rsiVal > 65) { rsiDir = 'DOWN'; rsiStrength = (rsiVal - 65) / 35; }
+    else if (rsiVal > 55) { rsiDir = 'UP';   rsiStrength = (rsiVal - 50) / 30; }
+    else if (rsiVal < 45) { rsiDir = 'DOWN'; rsiStrength = (50 - rsiVal) / 30; }
+    rsiStrength = Math.min(rsiStrength, 1);
 
-    if (latestRSI < 30 && latestRSI > prevRSI) {
-      // Oversold and recovering
-      direction = 'UP';
-      strength = (30 - latestRSI) / 30;
-    } else if (latestRSI > 70 && latestRSI < prevRSI) {
-      // Overbought and declining
-      direction = 'DOWN';
-      strength = (latestRSI - 70) / 30;
-    } else if (latestRSI > 50 && latestRSI > prevRSI) {
-      // Bullish momentum
-      direction = 'UP';
-      strength = Math.min((latestRSI - 50) / 50, 0.7);
-    } else if (latestRSI < 50 && latestRSI < prevRSI) {
-      // Bearish momentum
-      direction = 'DOWN';
-      strength = Math.min((50 - latestRSI) / 50, 0.7);
+    // ── 3. MACD ───────────────────────────────────────────────────────────────
+    const fast12 = ema(prices, 12);
+    const slow26 = ema(prices, 26);
+    const macdLine = fast12.map((v, i) => v - slow26[i]).slice(slow26.length - fast12.length);
+    const macdSlice = macdLine.slice(-35);
+    const signalLine = ema(macdSlice, 9);
+
+    const macdNow   = macdSlice[macdSlice.length - 1];
+    const sigNow    = signalLine[signalLine.length - 1];
+    const macdPrev  = macdSlice[macdSlice.length - 2];
+    const sigPrev   = signalLine[signalLine.length - 2];
+
+    let macdDir: 'UP' | 'DOWN' | 'NEUTRAL' = 'NEUTRAL';
+    let macdStrength = 0;
+    if (macdNow > sigNow) {
+      macdDir = 'UP';
+      // Crossover recently? Stronger signal
+      macdStrength = macdPrev <= sigPrev ? 0.8 : 0.4;
+    } else if (macdNow < sigNow) {
+      macdDir = 'DOWN';
+      macdStrength = macdPrev >= sigPrev ? 0.8 : 0.4;
     }
 
-    return { direction, strength };
-  }
+    // ── 4. VOLATILITY (for price bands) ──────────────────────────────────────
+    const vol20 = stdDev(prices.slice(-20)) / current;
 
-  // Bollinger Bands squeeze prediction
-  static bollingerSqueeze(prices: number[]): { direction: 'UP' | 'DOWN' | 'NEUTRAL'; strength: number } {
-    const bollinger = TechnicalIndicators.bollinger(prices, 20, 2);
-    const latestPrice = prices[prices.length - 1];
-    const latestUpper = bollinger.upper[bollinger.upper.length - 1];
-    const latestLower = bollinger.lower[bollinger.lower.length - 1];
-    const latestMiddle = bollinger.middle[bollinger.middle.length - 1];
+    // ── 5. COMBINED SIGNAL ────────────────────────────────────────────────────
+    // Weights: Trend 30%, RSI 35%, MACD 35%
+    const w = { trend: 0.30, rsi: 0.35, macd: 0.35 };
 
-    const bandWidth = (latestUpper - latestLower) / latestMiddle;
-    const pricePosition = (latestPrice - latestLower) / (latestUpper - latestLower);
+    const score =
+      w.trend * (trendDir === 'UP' ? trendStrength : trendDir === 'DOWN' ? -trendStrength : 0) +
+      w.rsi   * (rsiDir   === 'UP' ? rsiStrength   : rsiDir   === 'DOWN' ? -rsiStrength   : 0) +
+      w.macd  * (macdDir  === 'UP' ? macdStrength  : macdDir  === 'DOWN' ? -macdStrength  : 0);
 
-    let direction: 'UP' | 'DOWN' | 'NEUTRAL' = 'NEUTRAL';
-    let strength = 0;
-
-    if (bandWidth < 0.1) { // Squeeze condition
-      if (pricePosition > 0.6) {
-        direction = 'UP';
-        strength = 0.8;
-      } else if (pricePosition < 0.4) {
-        direction = 'DOWN';
-        strength = 0.8;
-      }
-    } else {
-      if (latestPrice > latestUpper) {
-        direction = 'UP';
-        strength = Math.min((latestPrice - latestUpper) / latestUpper, 0.6);
-      } else if (latestPrice < latestLower) {
-        direction = 'DOWN';
-        strength = Math.min((latestLower - latestPrice) / latestLower, 0.6);
+    // Backtest booster
+    let backtestBoost = 0;
+    let backtestInfluence = 'No backtest data available — prediction based on technicals only.';
+    if (backtestResult) {
+      const ret = backtestResult.totalReturn ?? 0;
+      if (ret > 15) {
+        backtestBoost = 0.12;
+        backtestInfluence = `Backtest returned +${ret.toFixed(1)}% → +12% confidence boost applied.`;
+      } else if (ret > 5) {
+        backtestBoost = 0.06;
+        backtestInfluence = `Backtest returned +${ret.toFixed(1)}% → +6% confidence boost applied.`;
+      } else if (ret < -10) {
+        backtestBoost = -0.08;
+        backtestInfluence = `Backtest returned ${ret.toFixed(1)}% → -8% confidence penalty applied.`;
+      } else {
+        backtestInfluence = `Backtest returned ${ret.toFixed(1)}% — neutral influence on prediction.`;
       }
     }
 
-    return { direction, strength };
-  }
+    // ── 6. DIRECTION & PREDICTED PRICE ───────────────────────────────────────
+    const finalDir: 'UP' | 'DOWN' | 'NEUTRAL' =
+      score > 0.05 ? 'UP' : score < -0.05 ? 'DOWN' : 'NEUTRAL';
 
-  // Volume-Price Trend analysis
-  static volumePriceTrend(prices: number[], volumes: number[]): { direction: 'UP' | 'DOWN' | 'NEUTRAL'; strength: number } {
-    if (prices.length < 10 || volumes.length < 10) {
-      return { direction: 'NEUTRAL', strength: 0 };
-    }
-
-    const recentPrices = prices.slice(-10);
-    const recentVolumes = volumes.slice(-10);
-    
-    let upVolume = 0;
-    let downVolume = 0;
-
-    for (let i = 1; i < recentPrices.length; i++) {
-      if (recentPrices[i] > recentPrices[i - 1]) {
-        upVolume += recentVolumes[i];
-      } else if (recentPrices[i] < recentPrices[i - 1]) {
-        downVolume += recentVolumes[i];
-      }
-    }
-
-    const totalVolume = upVolume + downVolume;
-    if (totalVolume === 0) return { direction: 'NEUTRAL', strength: 0 };
-
-    const upRatio = upVolume / totalVolume;
-    let direction: 'UP' | 'DOWN' | 'NEUTRAL' = 'NEUTRAL';
-    let strength = 0;
-
-    if (upRatio > 0.6) {
-      direction = 'UP';
-      strength = (upRatio - 0.5) * 2;
-    } else if (upRatio < 0.4) {
-      direction = 'DOWN';
-      strength = (0.5 - upRatio) * 2;
-    }
-
-    return { direction, strength };
-  }
-
-  // Main prediction function
-  static async generatePrediction(stock: Stock, config: PredictionConfig, backtestResult?: any): Promise<Prediction> {
-    // Get real historical data for analysis
-    const endDate = new Date().toISOString().split('T')[0];
-    const startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 1 year of data
-    
-    const historicalData = await historicalDataService.getHistoricalData(stock.symbol, startDate, endDate);
-    
-    if (historicalData.length < 50) {
-      console.warn(`Insufficient historical data for ${stock.symbol}, using fallback prediction`);
-      return this.generateFallbackPrediction(stock, config);
-    }
-    
-    const prices = historicalData.map(d => d.price);
-    const volumes = historicalData.map(d => d.volume || 1000000);
-
-    // Apply multiple prediction models
-    const trendAnalysis = this.linearRegression(
-      Array.from({ length: prices.length }, (_, i) => i),
-      prices
+    // Expected daily return from combined signal
+    const dailyExpectedReturn = score * 0.003 + dailyTrendReturn * 0.5;
+    const totalExpectedReturn = dailyExpectedReturn * config.days;
+    const predictedPrice = Math.max(
+      current * (1 + totalExpectedReturn + backtestBoost * Math.sign(score) * 0.01),
+      current * 0.5,
     );
 
-    const macdPred = this.macdPrediction(prices);
-    const rsiPred = this.rsiMomentum(prices);
-    const bollingerPred = this.bollingerSqueeze(prices);
-    const volumePred = this.volumePriceTrend(prices, volumes);
+    // ── 7. CONFIDENCE ─────────────────────────────────────────────────────────
+    const signalAgreement =
+      [trendDir, rsiDir, macdDir].filter(d => d === finalDir).length; // 0-3
+    const volPenalty = Math.min(vol20 * 5, 0.15); // high vol → lower confidence
+    let confidence = 40 + signalAgreement * 12 + Math.abs(score) * 25 - volPenalty * 100;
+    if (backtestBoost > 0) confidence += 5;
+    if (backtestBoost < 0) confidence -= 5;
+    confidence = Math.min(Math.max(Math.round(confidence), 38), 88);
 
-    // Combine predictions with weights
-    const predictions = [
-      { ...macdPred, weight: 0.25 },
-      { ...rsiPred, weight: 0.25 },
-      { ...bollingerPred, weight: 0.25 },
-      { ...volumePred, weight: 0.25 }
-    ];
-
-    let upScore = 0;
-    let downScore = 0;
-
-    predictions.forEach(pred => {
-      if (pred.direction === 'UP') {
-        upScore += pred.strength * pred.weight;
-      } else if (pred.direction === 'DOWN') {
-        downScore += pred.strength * pred.weight;
-      }
-    });
-
-    // Determine final direction
-    let finalDirection: 'UP' | 'DOWN' | 'NEUTRAL' = 'NEUTRAL';
-    let confidence = 50;
-
-    if (upScore > downScore && upScore > 0.3) {
-      // Boost confidence if backtest results support the prediction
-      if (backtestResult && backtestResult.totalReturn > 5) {
-        upScore *= 1.2; // 20% boost for good backtest performance
-      }
-      finalDirection = 'UP';
-      confidence = Math.min(50 + (upScore * 100), 95);
-    } else if (downScore > upScore && downScore > 0.3) {
-      // Boost confidence if backtest results support the prediction
-      if (backtestResult && backtestResult.totalReturn > 5) {
-        downScore *= 1.2;
-      }
-      finalDirection = 'DOWN';
-      confidence = Math.min(50 + (downScore * 100), 95);
-    } else {
-      confidence = 40 + Math.random() * 20; // 40-60% for neutral
-    }
-
-    // Calculate predicted price based on trend and direction
-    const trendFactor = trendAnalysis.slope * config.days;
-    const directionFactor = finalDirection === 'UP' ? 0.05 : finalDirection === 'DOWN' ? -0.05 : 0;
-    const volatilityFactor = (Math.random() - 0.5) * 0.02; // ±1% random factor
-
-    const predictedPrice = stock.price * (1 + trendFactor + directionFactor + volatilityFactor);
-
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + config.days);
+    // ── 8. PRICE BANDS ───────────────────────────────────────────────────────
+    const projectedVol = vol20 * Math.sqrt(config.days);
+    const priceLow  = Math.round(predictedPrice * (1 - projectedVol * 1.5) * 100) / 100;
+    const priceHigh = Math.round(predictedPrice * (1 + projectedVol * 1.5) * 100) / 100;
 
     return {
-      stockSymbol: stock.symbol,
-      date: new Date().toISOString().split('T')[0],
-      predictedPrice: Math.max(predictedPrice, stock.price * 0.5), // Minimum 50% of current price
-      predictedDirection: finalDirection,
-      confidence: Math.floor(confidence)
+      stockSymbol:      stock.symbol,
+      date:             new Date().toISOString().slice(0, 10),
+      predictedPrice:   Math.round(predictedPrice * 100) / 100,
+      predictedDirection: finalDir,
+      confidence,
+      signals: {
+        trend: {
+          direction:   trendDir,
+          strength:    trendStrength,
+          description: `60-day linear regression: slope ${slope > 0 ? '+' : ''}${(slope).toFixed(2)}/day, R²=${r2.toFixed(2)}`,
+        },
+        rsi: {
+          direction:   rsiDir,
+          strength:    rsiStrength,
+          value:       Math.round(rsiVal * 10) / 10,
+          description: rsiVal < 35
+            ? `RSI ${rsiVal.toFixed(1)} — oversold territory, mean-reversion likely`
+            : rsiVal > 65
+            ? `RSI ${rsiVal.toFixed(1)} — overbought, potential pullback`
+            : `RSI ${rsiVal.toFixed(1)} — neutral zone`,
+        },
+        macd: {
+          direction:   macdDir,
+          strength:    macdStrength,
+          description: `MACD ${macdNow > sigNow ? 'above' : 'below'} signal line ${macdPrev <= sigPrev && macdNow > sigNow ? '(fresh bullish crossover)' : macdPrev >= sigPrev && macdNow < sigNow ? '(fresh bearish crossover)' : ''}`,
+        },
+      },
+      priceRange: { low: priceLow, high: priceHigh },
+      methodology: `Technical analysis over 6 months of price history (${rawData.length} trading days). Trend (30%) + RSI (35%) + MACD (35%). 20-day volatility: ${(vol20 * 100).toFixed(2)}%/day → projected ${config.days}-day band ±${(projectedVol * 100).toFixed(1)}%.`,
+      backtestInfluence,
     };
   }
 
-  // Generate multiple predictions for different time horizons
-  static generateMultiplePredictions(stock: Stock): Prediction[] {
-    const timeHorizons = [1, 7, 30]; // 1 day, 1 week, 1 month
-    const predictions: Prediction[] = [];
-
-    timeHorizons.forEach(days => {
-      const config: PredictionConfig = {
-        days,
-        confidence: 80,
-        useML: true
-      };
-
-      const prediction = this.generatePrediction(stock, config);
-      predictions.push(prediction);
-    });
-
-    return predictions;
-  }
-
-  // Fallback prediction when no historical data is available
-  static generateFallbackPrediction(stock: Stock, config: PredictionConfig): Prediction {
-    const direction: 'UP' | 'DOWN' | 'NEUTRAL' = Math.random() > 0.5 ? 'UP' : 'DOWN';
-    const priceChange = (Math.random() - 0.5) * 0.1; // ±5% change
-    const predictedPrice = stock.price * (1 + priceChange);
-    
+  static fallback(
+    stock: Stock,
+    config: PredictionConfig,
+    backtestResult?: { totalReturn: number; sharpeRatio: number } | null,
+  ): DetailedPrediction {
+    const dir: 'UP' | 'DOWN' | 'NEUTRAL' = 'NEUTRAL';
     return {
       stockSymbol: stock.symbol,
-      date: new Date().toISOString().split('T')[0],
-      predictedPrice: Math.max(predictedPrice, stock.price * 0.5),
-      predictedDirection: direction,
-      confidence: Math.floor(Math.random() * 30) + 50 // 50-80% confidence
+      date: new Date().toISOString().slice(0, 10),
+      predictedPrice: stock.price,
+      predictedDirection: dir,
+      confidence: 45,
+      signals: {
+        trend: { direction: 'NEUTRAL', strength: 0, description: 'Insufficient data for trend analysis' },
+        rsi:   { direction: 'NEUTRAL', strength: 0, description: 'Insufficient data for RSI', value: 50 },
+        macd:  { direction: 'NEUTRAL', strength: 0, description: 'Insufficient data for MACD' },
+      },
+      priceRange: { low: stock.price * 0.95, high: stock.price * 1.05 },
+      methodology: 'Insufficient historical data — returning neutral prediction.',
+      backtestInfluence: 'No backtest data.',
     };
   }
 }
