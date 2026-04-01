@@ -9,25 +9,25 @@ import { stockApi } from '../services/stockApi';
 interface AppContextType {
   // User data
   userProfile: UserProfile | null;
-  
+
   // Stocks
   stocks: Stock[];
   selectedStocks: Stock[];
   userPortfolio: UserPortfolio[];
-  
+
   // Strategies
   strategies: Strategy[];
   selectedStrategy: Strategy | null;
-  
+
   // Predictions
   userPredictions: UserPrediction[];
-  
+
   // Other state
   backtestResults: BacktestResult | null;
   tradingParameters: TradingParameters;
   isDarkMode: boolean;
   isLoading: boolean;
-  
+
   // Actions
   selectStock: (stock: Stock) => Promise<void>;
   unselectStock: (symbol: string) => Promise<void>;
@@ -56,7 +56,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  
+
   // State
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [stocks, setStocks] = useState<Stock[]>([]);
@@ -88,21 +88,35 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // Load stocks and strategies
   useEffect(() => {
     setIsLoading(true);
-    
+
     const loadStocks = async () => {
+      // Ensure strategies are available immediately for strategy page display
+      setStrategies(mockStrategies);
+      console.log('AppContext: Strategies set:', mockStrategies.length);
+
       try {
         const stocksData = await getStocksWithRealTimeData();
+        console.log('AppContext: Loaded stocks:', stocksData.length);
         setStocks(stocksData);
       } catch (error) {
-        console.error('Failed to load stocks:', error);
-        setStocks([]);
+        console.error('AppContext: Failed to load stocks:', error);
+
+        // Try to load fallback data for quick recovery
+        try {
+          const fallbackData = await getStocksWithRealTimeData();
+          setStocks(fallbackData);
+          console.log('AppContext: Fallback stocks loaded:', fallbackData.length);
+        } catch (fallbackError) {
+          console.error('AppContext: Fallback also failed:', fallbackError);
+          setStocks([]);
+        }
       }
-      setStrategies(mockStrategies);
+
       setIsLoading(false);
     };
-    
+
     loadStocks();
-    
+
     // Set up periodic refresh for stock data during market hours
     const interval = setInterval(async () => {
       const marketStatus = stockApi.getMarketStatus();
@@ -115,7 +129,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         }
       }
     }, 60000); // Refresh every minute during market hours
-    
+
     return () => clearInterval(interval);
   }, []);
 
@@ -130,7 +144,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         .select('*')
         .eq('id', user.id)
         .single();
-      
+
       if (profile) {
         setUserProfile(profile);
       }
@@ -377,7 +391,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     try {
       const updatedParams = { ...tradingParameters, ...params };
-      
+
       const { error } = await supabase
         .from('trading_parameters')
         .upsert({

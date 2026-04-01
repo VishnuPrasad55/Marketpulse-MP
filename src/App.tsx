@@ -8,6 +8,7 @@ import { BacktestingPage } from './pages/BacktestingPage';
 import { PredictionsPage } from './pages/PredictionsPage';
 import { TradingDashboardPage } from './pages/TradingDashboardPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AlgoEditorPage } from './pages/AlgoEditorPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { AppProvider } from './context/AppContext';
 import { useAuth } from './hooks/useAuth';
@@ -35,6 +36,7 @@ function AppContent() {
           <Route index element={<HomePage />} />
           <Route path="stocks" element={<StockSelectionPage />} />
           <Route path="strategies" element={<StrategyPage />} />
+          <Route path="algo-editor" element={<AlgoEditorPage />} />
           <Route path="backtesting" element={<BacktestingPage />} />
           <Route path="predictions" element={<PredictionsPage />} />
           <Route path="dashboard" element={<TradingDashboardPage />} />
@@ -49,17 +51,12 @@ function App() {
   useEffect(() => {
     const light = document.querySelector('.cursor-light') as HTMLElement | null;
     if (!light) return;
-
     const handleMouseMove = (e: MouseEvent) => {
-    light.style.left = `${e.clientX}px`;
-    light.style.top = `${e.clientY}px`;
-  };
-
-    document.addEventListener('mousemove', handleMouseMove);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
+      light.style.left = `${e.clientX}px`;
+      light.style.top = `${e.clientY}px`;
     };
+    document.addEventListener('mousemove', handleMouseMove);
+    return () => document.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
   return (
