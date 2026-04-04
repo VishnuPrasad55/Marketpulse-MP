@@ -4,10 +4,16 @@
  * Uses NewsData.io (free tier: 200 requests/day) to fetch news for selected stocks,
  * then performs local sentiment analysis using a keyword-weighted scoring model.
  *
- * Setup: Add VITE_NEWSDATA_API_KEY to your .env file
- * Get a free key at https://newsdata.io (200 requests/day free)
+ * SETUP:
+ * 1. Go to https://newsdata.io/register and create a free account
+ * 2. Copy your API key from the dashboard
+ * 3. Add to .env:  VITE_NEWSDATA_API_KEY=pub_xxxxxxxxxxxxxxxxxxxxxxxx
  *
- * Falls back to mock news if no API key is set.
+ * The 401 error you were seeing means the API key is invalid or expired.
+ * Free tier allows 200 requests/day — the service caches for 10 minutes
+ * so you'll use at most ~144 requests/day for 1 stock refreshed every 10min.
+ *
+ * Falls back to realistic mock news if no API key is set or if the API fails.
  */
 
 export type SentimentColor = 'green' | 'yellow' | 'red';
@@ -33,6 +39,7 @@ export interface StockNewsSentiment {
   articles: NewsArticle[];
   summary: string;
   lastUpdated: string;
+  isMock?: boolean; // true when using demo data
 }
 
 // ─── Sentiment keyword dictionaries ──────────────────────────────────────────
@@ -44,6 +51,7 @@ const BULLISH_KEYWORDS = [
   'acquisition', 'deal', 'partnership', 'launch', 'win', 'award',
   'dividend', 'buyback', 'invest', 'breakthrough', 'innovation', 'upside',
   'recovery', 'improve', 'momentum', 'targets', 'guidance raised',
+  'higher', 'top', 'leading', 'best', 'advance', 'robust',
 ];
 
 const BEARISH_KEYWORDS = [
@@ -53,7 +61,7 @@ const BEARISH_KEYWORDS = [
   'lawsuit', 'fine', 'penalty', 'cut', 'layoff', 'restructure',
   'bankruptcy', 'debt', 'default', 'underperform', 'downside', 'warn',
   'volatile', 'uncertainty', 'regulatory', 'probe', 'resign', 'retire',
-  'guidance cut', 'guidance lowered',
+  'guidance cut', 'guidance lowered', 'weak', 'lower', 'slump', 'drag',
 ];
 
 const STRONG_BULLISH = ['record high', 'all-time high', 'strong buy', 'massive gain', 'stellar results'];
@@ -65,14 +73,11 @@ function scoreText(text: string): number {
   const lower = text.toLowerCase();
   let score = 0;
 
-  // Strong signals carry 2x weight
   STRONG_BULLISH.forEach(kw => { if (lower.includes(kw)) score += 2; });
   STRONG_BEARISH.forEach(kw => { if (lower.includes(kw)) score -= 2; });
-
   BULLISH_KEYWORDS.forEach(kw => { if (lower.includes(kw)) score += 1; });
   BEARISH_KEYWORDS.forEach(kw => { if (lower.includes(kw)) score -= 1; });
 
-  // Normalise to -1 … +1
   return Math.max(-1, Math.min(1, score / 5));
 }
 
@@ -85,98 +90,113 @@ function colorFromScore(score: number): SentimentColor {
 // ─── Company name → search query mapping ────────────────────────────────────
 
 const COMPANY_QUERIES: Record<string, string> = {
-  'RELIANCE':    'Reliance Industries stock',
-  'TCS':         'Tata Consultancy Services TCS stock',
-  'HDFCBANK':    'HDFC Bank stock India',
-  'ICICIBANK':   'ICICI Bank stock India',
-  'INFY':        'Infosys stock',
-  'TATASTEEL':   'Tata Steel stock',
-  'SBIN':        'State Bank of India SBI stock',
-  'BAJAJAUTO':   'Bajaj Auto stock',
-  'HINDUNILVR':  'Hindustan Unilever HUL stock',
-  'LT':          'Larsen Toubro L&T stock',
-  'TATAMOTORS.B':'Tata Motors stock',
-  'BHARTIARTL.B':'Bharti Airtel stock',
-  'ASIANPAINT.B':'Asian Paints stock',
+  'RELIANCE':    'Reliance Industries stock India',
+  'TCS':         'TCS Tata Consultancy Services earnings',
+  'HDFCBANK':    'HDFC Bank India stock',
+  'ICICIBANK':   'ICICI Bank India stock',
+  'INFY':        'Infosys earnings India',
+  'TATASTEEL':   'Tata Steel India',
+  'SBIN':        'SBI State Bank India',
+  'BAJAJAUTO':   'Bajaj Auto India',
+  'HINDUNILVR':  'HUL Hindustan Unilever India',
+  'LT':          'Larsen Toubro India',
+  'TATAMOTORS.B':'Tata Motors India',
+  'BHARTIARTL.B':'Airtel Bharti India telecom',
+  'ASIANPAINT.B':'Asian Paints India',
+  'ITC':         'ITC India FMCG',
+  'WIPRO':       'Wipro IT India',
+  'HCLTECH':     'HCL Technologies India',
+  'AXISBANK':    'Axis Bank India',
+  'KOTAKBANK':   'Kotak Mahindra Bank India',
+  'MARUTI':      'Maruti Suzuki India automobile',
+  'SUNPHARMA':   'Sun Pharma India pharmaceutical',
+  'TITAN':       'Titan Company India',
+  'ADANIENT':    'Adani Enterprises India',
 };
 
-// ─── Mock data (used when no API key is set) ─────────────────────────────────
+// ─── Realistic mock data generator ──────────────────────────────────────────
 
 function generateMockNews(symbol: string, companyName: string): StockNewsSentiment {
   const seed = symbol.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
   const rand = (n: number) => {
-    let x = Math.sin(seed + n) * 10000;
+    const x = Math.sin(seed + n) * 10000;
     return x - Math.floor(x);
   };
+
+  const today = new Date();
+  const daysAgo = (d: number) => new Date(today.getTime() - d * 86400000).toISOString();
 
   const mockArticles: NewsArticle[] = [
     {
       title: `${companyName} reports strong quarterly earnings, beats estimates`,
-      description: `${companyName} posted better-than-expected revenue growth driven by expansion in core segments.`,
-      url: '#',
+      description: `${companyName} posted better-than-expected revenue growth driven by expansion in core segments. Management raised FY guidance.`,
+      url: `https://economictimes.indiatimes.com/markets/stocks/news`,
       source: 'Economic Times',
-      publishedAt: new Date(Date.now() - rand(1) * 86400000 * 2).toISOString(),
+      publishedAt: daysAgo(Math.floor(rand(1) * 2)),
       sentiment: 'green',
       sentimentScore: 0.6 + rand(2) * 0.3,
     },
     {
       title: `Analysts upgrade ${companyName} to 'Buy' with raised target price`,
-      description: `Multiple brokerages have revised their outlook positively following recent operational updates.`,
-      url: '#',
-      source: 'Mint',
-      publishedAt: new Date(Date.now() - rand(3) * 86400000 * 3).toISOString(),
+      description: `Multiple brokerages have revised their outlook positively following recent operational updates and strong demand signals.`,
+      url: `https://www.moneycontrol.com/news/business/stocks/`,
+      source: 'Moneycontrol',
+      publishedAt: daysAgo(2 + Math.floor(rand(3) * 2)),
       sentiment: 'green',
       sentimentScore: 0.5 + rand(4) * 0.2,
     },
     {
       title: `${companyName} faces regulatory scrutiny over compliance norms`,
-      description: `Regulators have sought clarifications on certain business practices; company says it is cooperating fully.`,
-      url: '#',
+      description: `Regulators have sought clarifications on certain business practices. The company says it is fully cooperating and expects resolution shortly.`,
+      url: `https://www.business-standard.com/markets`,
       source: 'Business Standard',
-      publishedAt: new Date(Date.now() - rand(5) * 86400000 * 5).toISOString(),
+      publishedAt: daysAgo(4 + Math.floor(rand(5) * 3)),
       sentiment: rand(6) > 0.5 ? 'yellow' : 'red',
       sentimentScore: -(0.1 + rand(7) * 0.3),
     },
     {
-      title: `${companyName} announces strategic partnership to boost growth`,
-      description: `The company signed a key deal expected to add significant revenue in the coming quarters.`,
-      url: '#',
+      title: `${companyName} announces strategic partnership to accelerate growth`,
+      description: `The company signed a key collaboration agreement expected to add significant revenue over the coming quarters.`,
+      url: `https://www.financialexpress.com/market/`,
       source: 'Financial Express',
-      publishedAt: new Date(Date.now() - rand(8) * 86400000 * 7).toISOString(),
+      publishedAt: daysAgo(6 + Math.floor(rand(8) * 2)),
       sentiment: 'green',
       sentimentScore: 0.4 + rand(9) * 0.4,
     },
     {
       title: `Market volatility weighs on ${companyName} share price`,
-      description: `Broader market headwinds and sector-specific concerns have kept investor sentiment cautious.`,
-      url: '#',
-      source: 'Moneycontrol',
-      publishedAt: new Date(Date.now() - rand(10) * 86400000 * 9).toISOString(),
+      description: `Broader market headwinds and sector-specific concerns have kept investor sentiment cautious despite strong fundamentals.`,
+      url: `https://www.mint.com/market/stock-market-news`,
+      source: 'Mint',
+      publishedAt: daysAgo(8 + Math.floor(rand(10) * 3)),
       sentiment: 'yellow',
       sentimentScore: -0.05 + (rand(11) - 0.5) * 0.1,
     },
   ];
 
   const avgScore = mockArticles.reduce((sum, a) => sum + a.sentimentScore, 0) / mockArticles.length;
-  const bullish = mockArticles.filter(a => a.sentiment === 'green').length;
-  const bearish = mockArticles.filter(a => a.sentiment === 'red').length;
-  const neutral = mockArticles.filter(a => a.sentiment === 'yellow').length;
+  const bullish  = mockArticles.filter(a => a.sentiment === 'green').length;
+  const bearish  = mockArticles.filter(a => a.sentiment === 'red').length;
+  const neutral  = mockArticles.filter(a => a.sentiment === 'yellow').length;
+  const total    = mockArticles.length;
 
   return {
     symbol,
     companyName,
-    overallSentiment: colorFromScore(avgScore),
-    confidenceScore: Math.round(50 + Math.abs(avgScore) * 50),
-    bullishPercent: Math.round((bullish / mockArticles.length) * 100),
-    bearishPercent: Math.round((bearish / mockArticles.length) * 100),
-    neutralPercent: Math.round((neutral / mockArticles.length) * 100),
-    articles: mockArticles,
-    summary: avgScore > 0.1
-      ? `Overall sentiment for ${companyName} is positive. Recent earnings and analyst upgrades are driving confidence.`
-      : avgScore < -0.1
-      ? `Market sentiment for ${companyName} is cautious. Regulatory concerns and broader headwinds are creating uncertainty.`
-      : `Sentiment for ${companyName} is mixed. Positive fundamentals are balanced by macro uncertainty.`,
+    overallSentiment:  colorFromScore(avgScore),
+    confidenceScore:   Math.round(50 + Math.abs(avgScore) * 40),
+    bullishPercent:    Math.round((bullish / total) * 100),
+    bearishPercent:    Math.round((bearish / total) * 100),
+    neutralPercent:    Math.round((neutral / total) * 100),
+    articles:          mockArticles,
+    summary:
+      avgScore > 0.1
+        ? `Overall sentiment for ${companyName} is positive. Recent earnings and analyst upgrades are driving confidence.`
+        : avgScore < -0.1
+        ? `Market sentiment for ${companyName} is cautious. Regulatory concerns and macro headwinds are creating uncertainty.`
+        : `Sentiment for ${companyName} is mixed. Positive fundamentals are balanced by macro uncertainty.`,
     lastUpdated: new Date().toISOString(),
+    isMock: true,
   };
 }
 
@@ -185,11 +205,20 @@ function generateMockNews(symbol: string, companyName: string): StockNewsSentime
 class NewsSentimentService {
   private cache = new Map<string, { data: StockNewsSentiment; timestamp: number }>();
   private readonly CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+  private apiKeyInvalid = false; // set to true after a 401 so we stop retrying
 
   private getCached(key: string): StockNewsSentiment | null {
     const c = this.cache.get(key);
     if (c && Date.now() - c.timestamp < this.CACHE_DURATION) return c.data;
     return null;
+  }
+
+  /**
+   * Validate that an API key looks like a real NewsData.io key.
+   * Keys start with "pub_" and are at least 20 characters.
+   */
+  private isValidApiKey(key: string): boolean {
+    return key.startsWith('pub_') && key.length >= 20;
   }
 
   async getStockNewsSentiment(
@@ -199,58 +228,78 @@ class NewsSentimentService {
     const cached = this.getCached(symbol);
     if (cached) return cached;
 
-    const apiKey = import.meta.env.VITE_NEWSDATA_API_KEY;
+    const apiKey = import.meta.env.VITE_NEWSDATA_API_KEY?.trim() ?? '';
 
-    if (!apiKey) {
-      console.warn('⚠️ VITE_NEWSDATA_API_KEY not set — using mock news data');
+    // Use mock data if: no key, key looks invalid, or key already returned 401
+    if (!apiKey || !this.isValidApiKey(apiKey) || this.apiKeyInvalid) {
+      if (!apiKey) {
+        console.info(`[NewsSentiment] No API key set — using demo data for ${symbol}. Add VITE_NEWSDATA_API_KEY to .env`);
+      }
       const mock = generateMockNews(symbol, companyName);
       this.cache.set(symbol, { data: mock, timestamp: Date.now() });
       return mock;
     }
 
     try {
-      const query = COMPANY_QUERIES[symbol] || `${companyName} stock`;
-      // NewsData.io free endpoint
-      const url = `https://newsdata.io/api/1/news?apikey=${apiKey}&q=${encodeURIComponent(query)}&language=en&category=business&size=10`;
+      const query  = COMPANY_QUERIES[symbol] ?? `${companyName} stock India`;
+      // NewsData.io v1 latest endpoint
+      const url    = `https://newsdata.io/api/1/latest?apikey=${apiKey}&q=${encodeURIComponent(query)}&language=en&category=business&size=10`;
+      const res    = await fetch(url, { signal: AbortSignal.timeout(10_000) });
 
-      const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (res.status === 401 || res.status === 403) {
+        console.error(`[NewsSentiment] API key rejected (${res.status}). Check your VITE_NEWSDATA_API_KEY. Using demo data.`);
+        this.apiKeyInvalid = true; // stop hitting the API with a bad key
+        const mock = generateMockNews(symbol, companyName);
+        this.cache.set(symbol, { data: mock, timestamp: Date.now() });
+        return mock;
+      }
 
-      if (!response.ok) throw new Error(`NewsData HTTP ${response.status}`);
+      if (res.status === 429) {
+        console.warn(`[NewsSentiment] Rate limit reached for NewsData.io. Using demo data.`);
+        const mock = generateMockNews(symbol, companyName);
+        this.cache.set(symbol, { data: mock, timestamp: Date.now() });
+        return mock;
+      }
 
-      const json = await response.json();
+      if (!res.ok) throw new Error(`NewsData HTTP ${res.status}`);
+
+      const json = await res.json();
 
       if (json.status !== 'success' || !json.results?.length) {
-        throw new Error('No articles returned');
+        console.warn(`[NewsSentiment] No articles for ${symbol}, using demo data`);
+        const mock = generateMockNews(symbol, companyName);
+        this.cache.set(symbol, { data: mock, timestamp: Date.now() });
+        return mock;
       }
 
       const articles: NewsArticle[] = json.results.map((item: any) => {
-        const text = `${item.title ?? ''} ${item.description ?? ''}`;
+        const text  = `${item.title ?? ''} ${item.description ?? ''}`;
         const score = scoreText(text);
         return {
-          title: item.title ?? 'Untitled',
+          title:       item.title      ?? 'Untitled',
           description: item.description ?? null,
-          url: item.link ?? '#',
-          source: item.source_id ?? 'Unknown',
-          publishedAt: item.pubDate ?? new Date().toISOString(),
-          sentiment: colorFromScore(score),
+          url:         item.link       ?? '#',
+          source:      item.source_id  ?? 'Unknown',
+          publishedAt: item.pubDate    ?? new Date().toISOString(),
+          sentiment:   colorFromScore(score),
           sentimentScore: score,
         } as NewsArticle;
       });
 
       const avgScore = articles.reduce((s, a) => s + a.sentimentScore, 0) / articles.length;
-      const bullish = articles.filter(a => a.sentiment === 'green').length;
-      const bearish = articles.filter(a => a.sentiment === 'red').length;
-      const neutral = articles.filter(a => a.sentiment === 'yellow').length;
-      const total = articles.length;
+      const bullish  = articles.filter(a => a.sentiment === 'green').length;
+      const bearish  = articles.filter(a => a.sentiment === 'red').length;
+      const neutral  = articles.filter(a => a.sentiment === 'yellow').length;
+      const total    = articles.length;
 
       const result: StockNewsSentiment = {
         symbol,
         companyName,
-        overallSentiment: colorFromScore(avgScore),
-        confidenceScore: Math.round(Math.min(95, 50 + Math.abs(avgScore) * 50)),
-        bullishPercent: Math.round((bullish / total) * 100),
-        bearishPercent: Math.round((bearish / total) * 100),
-        neutralPercent: Math.round((neutral / total) * 100),
+        overallSentiment:  colorFromScore(avgScore),
+        confidenceScore:   Math.round(Math.min(95, 50 + Math.abs(avgScore) * 45)),
+        bullishPercent:    Math.round((bullish / total) * 100),
+        bearishPercent:    Math.round((bearish / total) * 100),
+        neutralPercent:    Math.round((neutral / total) * 100),
         articles,
         summary:
           avgScore > 0.1
@@ -259,13 +308,14 @@ class NewsSentimentService {
             ? `News sentiment for ${companyName} is cautious-to-negative; watch for further developments.`
             : `News sentiment for ${companyName} is balanced; no strong directional signal from recent coverage.`,
         lastUpdated: new Date().toISOString(),
+        isMock: false,
       };
 
       this.cache.set(symbol, { data: result, timestamp: Date.now() });
       return result;
 
     } catch (error) {
-      console.warn(`⚠️ News fetch failed for ${symbol}:`, error);
+      console.warn(`[NewsSentiment] Fetch failed for ${symbol}:`, error);
       const mock = generateMockNews(symbol, companyName);
       this.cache.set(symbol, { data: mock, timestamp: Date.now() });
       return mock;
@@ -275,19 +325,20 @@ class NewsSentimentService {
   async getMultipleStocksSentiment(
     stocks: Array<{ symbol: string; name: string }>
   ): Promise<StockNewsSentiment[]> {
-    // Fetch with a small delay between requests to avoid rate limiting
     const results: StockNewsSentiment[] = [];
     for (const stock of stocks) {
       const result = await this.getStockNewsSentiment(stock.symbol, stock.name);
       results.push(result);
-      await new Promise(r => setTimeout(r, 300));
+      // Small delay to avoid hammering the API (free tier: 200 req/day)
+      await new Promise(r => setTimeout(r, 400));
     }
     return results;
   }
 
-  clearCache(): void {
-    this.cache.clear();
-  }
+  clearCache(): void { this.cache.clear(); }
+
+  /** Reset the invalid-key flag (useful after the user updates their key in settings) */
+  resetApiKeyState(): void { this.apiKeyInvalid = false; }
 }
 
 export const newsSentimentService = new NewsSentimentService();
