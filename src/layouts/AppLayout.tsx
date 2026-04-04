@@ -3,7 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { NavLink } from 'react-router-dom';
 import {
   Home, TrendingUp, BarChart2, Activity, LineChart,
-  Settings, Layers, Code2, FlaskConical,
+  Settings, Layers, Code2, FlaskConical, Star,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { LiveTicker } from '../components/LiveTicker';
@@ -12,8 +12,9 @@ import { useAppContext } from '../context/AppContext';
 const NAV_ITEMS = [
   { name: 'Home',           path: '/',              icon: Home,         badge: null    },
   { name: 'Stocks',         path: '/stocks',        icon: TrendingUp,   badge: null    },
+  { name: 'Watchlist',      path: '/watchlist',     icon: Star,         badge: 'NEW'   },
   { name: 'Strategies',     path: '/strategies',    icon: Layers,       badge: null    },
-  { name: 'Algo Editor',    path: '/algo-editor',   icon: Code2,        badge: 'NEW'   },
+  { name: 'Algo Editor',    path: '/algo-editor',   icon: Code2,        badge: null    },
   { name: 'Paper Trading',  path: '/paper-trading', icon: FlaskConical, badge: 'SIM'   },
   { name: 'Backtesting',    path: '/backtesting',   icon: BarChart2,    badge: null    },
   { name: 'Predictions',    path: '/predictions',   icon: LineChart,    badge: 'AI'    },
@@ -28,7 +29,7 @@ const Sidebar: React.FC<{ isOpen: boolean }> = ({ isOpen }) => (
       bg-gray-900/95 backdrop-blur-xl border-r border-gray-800/80`}
     style={{ top: '57px' }}
   >
-    <nav className="flex-1 py-4 space-y-0.5 px-2 overflow-hidden">
+    <nav className="flex-1 py-4 space-y-0.5 px-2 overflow-hidden overflow-y-auto custom-scrollbar">
       {NAV_ITEMS.map(({ name, path, icon: Icon, badge }) => (
         <NavLink
           key={path}
@@ -86,9 +87,10 @@ const Sidebar: React.FC<{ isOpen: boolean }> = ({ isOpen }) => (
         <p className="text-xs text-gray-400 leading-relaxed mb-2">
           Write algorithms, backtest, and predict prices.
         </p>
-        <button className="w-full text-xs py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors">
+        <a href="https://github.com/VishnuPrasad55/Marketpulse-MP" target="_blank" rel="noopener noreferrer"
+          className="block w-full text-xs py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors text-center">
           View Docs
-        </button>
+        </a>
       </div>
     </div>
   </aside>

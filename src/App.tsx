@@ -10,6 +10,7 @@ import { TradingDashboardPage } from './pages/TradingDashboardPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AlgoEditorPage } from './pages/AlgoEditorPage';
 import { PaperTradingPage } from './pages/PaperTradingPage';
+import { WatchlistPage } from './pages/WatchlistPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { AppProvider } from './context/AppContext';
 import { useAuth } from './hooks/useAuth';
@@ -21,7 +22,10 @@ function AppContent() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-emerald-500 border-t-transparent" />
+          <p className="text-gray-500 text-sm">Loading MarketPulse…</p>
+        </div>
       </div>
     );
   }
@@ -36,6 +40,7 @@ function AppContent() {
         <Route path="/" element={<AppLayout />}>
           <Route index element={<HomePage />} />
           <Route path="stocks" element={<StockSelectionPage />} />
+          <Route path="watchlist" element={<WatchlistPage />} />
           <Route path="strategies" element={<StrategyPage />} />
           <Route path="algo-editor" element={<AlgoEditorPage />} />
           <Route path="backtesting" element={<BacktestingPage />} />
@@ -43,9 +48,30 @@ function AppContent() {
           <Route path="dashboard" element={<TradingDashboardPage />} />
           <Route path="paper-trading" element={<PaperTradingPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="kite-callback" element={<KiteCallbackPage />} />
         </Route>
       </Routes>
     </Router>
+  );
+}
+
+// Minimal Kite callback handler
+function KiteCallbackPage() {
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('request_token');
+    if (token) {
+      window.opener?.postMessage({ type: 'kite_callback', request_token: token }, window.location.origin);
+      window.close();
+    }
+  }, []);
+  return (
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-2 border-orange-500 border-t-transparent mx-auto mb-3" />
+        <p className="text-gray-400 text-sm">Completing Zerodha authentication…</p>
+      </div>
+    </div>
   );
 }
 

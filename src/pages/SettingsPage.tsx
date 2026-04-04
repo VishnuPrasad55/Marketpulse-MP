@@ -1,797 +1,659 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAppContext } from '../context/AppContext';
 import {
-  User,
-  Bell,
-  Shield,
-  DollarSign,
-  TrendingUp,
-  Moon,
-  Sun,
-  Smartphone,
-  Mail,
-  Lock,
-  AlertTriangle,
-  CheckCircle2,
-  Settings as SettingsIcon,
-  Download,
-  Upload,
-  Trash2,
-  Eye,
-  EyeOff,
-  Save,
-  RefreshCw
+  User, Bell, Shield, TrendingUp, Moon, Sun,
+  Smartphone, Mail, Lock, AlertTriangle, CheckCircle2,
+  Settings as SettingsIcon, Download, Upload, Trash2,
+  Eye, EyeOff, Save, RefreshCw, Info, Database,
+  Key, LogOut, ChevronRight
 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../lib/supabase';
 
+// ─── Toast ────────────────────────────────────────────────────────────────────
+interface Toast { id: string; message: string; type: 'success' | 'error' | 'info' }
+
+const useToasts = () => {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const show = useCallback((message: string, type: Toast['type'] = 'success') => {
+    const id = Date.now().toString();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+  }, []);
+  return { toasts, show };
+};
+
+const ToastContainer: React.FC<{ toasts: Toast[] }> = ({ toasts }) => (
+  <div className="fixed top-4 right-4 z-[200] space-y-2 pointer-events-none">
+    {toasts.map(t => (
+      <div key={t.id} className={`flex items-center gap-2 px-4 py-3 rounded-xl shadow-xl text-sm font-medium border animate-slide-up ${
+        t.type === 'success' ? 'bg-gray-800 border-emerald-500/40 text-emerald-400' :
+        t.type === 'error'   ? 'bg-gray-800 border-red-500/40 text-red-400' :
+                               'bg-gray-800 border-blue-500/40 text-blue-400'
+      }`}>
+        {t.type === 'success' ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+        {t.message}
+      </div>
+    ))}
+  </div>
+);
+
+// ─── Section wrapper ──────────────────────────────────────────────────────────
+const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+  <div className="space-y-4">
+    <h3 className="text-base font-semibold text-white">{title}</h3>
+    {children}
+  </div>
+);
+
+// ─── Toggle row ───────────────────────────────────────────────────────────────
+const ToggleRow: React.FC<{
+  label: string; sub?: string;
+  checked: boolean; onChange: (v: boolean) => void;
+  icon?: React.ReactNode;
+}> = ({ label, sub, checked, onChange, icon }) => (
+  <div className="flex items-center justify-between py-3 border-b border-gray-700/40 last:border-0">
+    <div className="flex items-center gap-3">
+      {icon && <span className="text-gray-400">{icon}</span>}
+      <div>
+        <p className="text-sm text-gray-200">{label}</p>
+        {sub && <p className="text-xs text-gray-500 mt-0.5">{sub}</p>}
+      </div>
+    </div>
+    <button
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${checked ? 'bg-emerald-600' : 'bg-gray-600'}`}
+    >
+      <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${checked ? 'translate-x-5' : 'translate-x-0'}`} />
+    </button>
+  </div>
+);
+
+// ─── Field ────────────────────────────────────────────────────────────────────
+const Field: React.FC<{
+  label: string; type?: string; value: string | number;
+  onChange: (v: string) => void; min?: number; max?: number;
+  step?: number; suffix?: string; readOnly?: boolean;
+}> = ({ label, type = 'text', value, onChange, min, max, step, suffix, readOnly }) => (
+  <div>
+    <label className="block text-xs text-gray-400 mb-1.5">{label}</label>
+    <div className="flex items-center gap-2">
+      <input
+        type={type}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        min={min} max={max} step={step}
+        readOnly={readOnly}
+        className={`flex-1 px-3 py-2 rounded-xl text-sm text-white border transition-colors focus:outline-none ${
+          readOnly
+            ? 'bg-gray-900/40 border-gray-700/40 text-gray-400 cursor-default'
+            : 'bg-gray-800/60 border-gray-700/50 focus:border-emerald-500/50 focus:bg-gray-800'
+        }`}
+      />
+      {suffix && <span className="text-xs text-gray-500 flex-shrink-0">{suffix}</span>}
+    </div>
+  </div>
+);
+
+const SelectField: React.FC<{
+  label: string; value: string; onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}> = ({ label, value, onChange, options }) => (
+  <div>
+    <label className="block text-xs text-gray-400 mb-1.5">{label}</label>
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="w-full px-3 py-2 rounded-xl text-sm text-white bg-gray-800/60 border border-gray-700/50 focus:border-emerald-500/50 focus:outline-none transition-colors"
+    >
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  </div>
+);
+
+// ─── Notification preferences (stored in localStorage) ────────────────────────
+const NOTIF_KEY = 'mp_notification_prefs';
+const defaultNotifPrefs = {
+  email: true, push: true, sms: false,
+  priceAlerts: true, tradeExecutions: true, marketNews: false, weeklyReports: true,
+};
+
+// ─── Security settings (stored in localStorage) ───────────────────────────────
+const SECURITY_KEY = 'mp_security_prefs';
+const defaultSecurityPrefs = {
+  twoFactorEnabled: false, sessionTimeout: 30, loginAlerts: true,
+};
+
+// ─── Appearance settings (stored in localStorage) ─────────────────────────────
+const APPEARANCE_KEY = 'mp_appearance_prefs';
+const defaultAppearancePrefs = {
+  compactMode: false, showVolume: true, showSectorBadge: true,
+  defaultChart: '1M' as string, language: 'en',
+};
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export function SettingsPage() {
   const { isDarkMode, toggleDarkMode, tradingParameters, updateTradingParameters, userProfile, updateUserProfile } = useAppContext();
+  const { signOut } = useAuth();
+  const { toasts, show: showToast } = useToasts();
   const [activeTab, setActiveTab] = useState('profile');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState('');
-  const [error, setError] = useState('');
-  
-  const [notifications, setNotifications] = useState({
-    email: true,
-    push: true,
-    sms: false,
-    priceAlerts: true,
-    tradeExecutions: true,
-    marketNews: false,
-    weeklyReports: true
-  });
-  
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [tradingLoading, setTradingLoading] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  // Profile form state
   const [profile, setProfile] = useState({
-    full_name: '',
-    phone: '',
-    risk_tolerance: 'Medium',
-    experience_level: 'Beginner'
-  });
-  
-  const [security, setSecurity] = useState({
-    twoFactorEnabled: true,
-    sessionTimeout: 30,
-    loginAlerts: true
+    full_name: '', phone: '', risk_tolerance: 'Medium', experience_level: 'Beginner',
   });
 
-  // Load user profile data
+  // Trading params form state (local copy for batch save)
+  const [tradingLocal, setTradingLocal] = useState({ ...tradingParameters });
+
+  // Notification prefs (localStorage)
+  const [notifs, setNotifs] = useState(() => {
+    try { return { ...defaultNotifPrefs, ...JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}') }; }
+    catch { return defaultNotifPrefs; }
+  });
+
+  // Security prefs (localStorage)
+  const [security, setSecurity] = useState(() => {
+    try { return { ...defaultSecurityPrefs, ...JSON.parse(localStorage.getItem(SECURITY_KEY) || '{}') }; }
+    catch { return defaultSecurityPrefs; }
+  });
+
+  // Appearance prefs (localStorage)
+  const [appearance, setAppearance] = useState(() => {
+    try { return { ...defaultAppearancePrefs, ...JSON.parse(localStorage.getItem(APPEARANCE_KEY) || '{}') }; }
+    catch { return defaultAppearancePrefs; }
+  });
+
+  // Sync profile from context
   useEffect(() => {
     if (userProfile) {
       setProfile({
         full_name: userProfile.full_name || '',
         phone: userProfile.phone || '',
         risk_tolerance: userProfile.risk_tolerance || 'Medium',
-        experience_level: userProfile.experience_level || 'Beginner'
+        experience_level: userProfile.experience_level || 'Beginner',
       });
     }
   }, [userProfile]);
 
-  const tabs = [
-    { id: 'profile', name: 'Profile', icon: <User size={20} /> },
-    { id: 'trading', name: 'Trading', icon: <TrendingUp size={20} /> },
-    { id: 'notifications', name: 'Notifications', icon: <Bell size={20} /> },
-    { id: 'security', name: 'Security', icon: <Shield size={20} /> },
-    { id: 'appearance', name: 'Appearance', icon: <SettingsIcon size={20} /> }
-  ];
+  // Sync trading params from context
+  useEffect(() => {
+    setTradingLocal({ ...tradingParameters });
+  }, [tradingParameters]);
 
-  const handleTradingParameterChange = (key: string, value: any) => {
-    updateTradingParameters({ [key]: value });
+  // Save notification prefs immediately on change
+  const updateNotif = (key: string, value: boolean) => {
+    const next = { ...notifs, [key]: value };
+    setNotifs(next);
+    localStorage.setItem(NOTIF_KEY, JSON.stringify(next));
+    showToast('Notification preference saved', 'success');
   };
 
-  const handleNotificationChange = (key: string, value: boolean) => {
-    setNotifications(prev => ({ ...prev, [key]: value }));
+  // Save security prefs immediately on change
+  const updateSecurity = (key: string, value: any) => {
+    const next = { ...security, [key]: value };
+    setSecurity(next);
+    localStorage.setItem(SECURITY_KEY, JSON.stringify(next));
+    showToast('Security setting saved', 'success');
   };
 
-  const handleProfileChange = (key: string, value: string) => {
-    setProfile(prev => ({ ...prev, [key]: value }));
+  // Save appearance prefs immediately on change
+  const updateAppearance = (key: string, value: any) => {
+    const next = { ...appearance, [key]: value };
+    setAppearance(next);
+    localStorage.setItem(APPEARANCE_KEY, JSON.stringify(next));
+    showToast('Appearance preference saved', 'success');
   };
 
-  const handleSecurityChange = (key: string, value: any) => {
-    setSecurity(prev => ({ ...prev, [key]: value }));
-  };
-
-  const handleSaveProfile = async () => {
-    setLoading(true);
-    setError('');
-    setSuccess('');
-    
+  // Save profile to Supabase
+  const saveProfile = async () => {
+    setProfileLoading(true);
     try {
       await updateUserProfile(profile);
-      setSuccess('Profile updated successfully!');
-    } catch (err) {
-      setError('Failed to update profile');
+      showToast('Profile updated successfully', 'success');
+    } catch {
+      showToast('Failed to update profile', 'error');
     } finally {
-      setLoading(false);
+      setProfileLoading(false);
     }
   };
 
-  const renderProfileSettings = () => (
-    <div className="space-y-6">
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          Personal Information
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Full Name
-            </label>
-            <input
-              type="text"
-              value={profile.full_name}
-              onChange={(e) => handleProfileChange('full_name', e.target.value)}
-              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            />
-          </div>
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Phone Number
-            </label>
-            <input
-              type="tel"
-              value={profile.phone}
-              onChange={(e) => handleProfileChange('phone', e.target.value)}
-              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            />
-          </div>
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Risk Tolerance
-            </label>
-            <select
-              value={profile.risk_tolerance}
-              onChange={(e) => handleProfileChange('risk_tolerance', e.target.value)}
-              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            >
-              <option value="Conservative">Conservative</option>
-              <option value="Medium">Medium</option>
-              <option value="Aggressive">Aggressive</option>
-            </select>
-          </div>
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Trading Experience
-            </label>
-            <select
-              value={profile.experience_level}
-              onChange={(e) => handleProfileChange('experience_level', e.target.value)}
-              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            >
-              <option value="Beginner">Beginner (0-1 years)</option>
-              <option value="Intermediate">Intermediate (1-5 years)</option>
-              <option value="Advanced">Advanced (5+ years)</option>
-              <option value="Professional">Professional</option>
-            </select>
-          </div>
-        </div>
-      </div>
+  // Save trading params to Supabase
+  const saveTradingParams = async () => {
+    setTradingLoading(true);
+    try {
+      await updateTradingParameters(tradingLocal);
+      showToast('Trading parameters saved', 'success');
+    } catch {
+      showToast('Failed to save trading parameters', 'error');
+    } finally {
+      setTradingLoading(false);
+    }
+  };
 
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          API Configuration
-        </h3>
-        <div className="space-y-4">
+  // Export user data as JSON
+  const exportData = () => {
+    const data = {
+      profile, tradingParameters: tradingLocal,
+      notifications: notifs, security, appearance,
+      exportedAt: new Date().toISOString(),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'marketpulse-settings.json';
+    a.click(); URL.revokeObjectURL(url);
+    showToast('Settings exported', 'success');
+  };
+
+  // Delete account
+  const deleteAccount = async () => {
+    try {
+      const { error } = await supabase.auth.admin.deleteUser((await supabase.auth.getUser()).data.user?.id ?? '');
+      if (error) throw error;
+      await signOut();
+    } catch {
+      // fallback: just sign out and clear local data
+      localStorage.clear();
+      await signOut();
+      showToast('Account data cleared. Contact support to fully delete your account.', 'info');
+    }
+    setDeleteConfirm(false);
+  };
+
+  const tabs = [
+    { id: 'profile',       label: 'Profile',       icon: User },
+    { id: 'trading',       label: 'Trading',        icon: TrendingUp },
+    { id: 'notifications', label: 'Notifications',  icon: Bell },
+    { id: 'security',      label: 'Security',       icon: Shield },
+    { id: 'appearance',    label: 'Appearance',     icon: SettingsIcon },
+    { id: 'data',          label: 'Data',           icon: Database },
+  ];
+
+  // ── Tab content renderers ──────────────────────────────────────────────────
+
+  const renderProfile = () => (
+    <div className="space-y-6">
+      <Section title="Personal information">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Full name" value={profile.full_name} onChange={v => setProfile(p => ({ ...p, full_name: v }))} />
+          <Field label="Phone number" type="tel" value={profile.phone} onChange={v => setProfile(p => ({ ...p, phone: v }))} />
+          <SelectField label="Risk tolerance" value={profile.risk_tolerance} onChange={v => setProfile(p => ({ ...p, risk_tolerance: v }))}
+            options={[{ value: 'Conservative', label: 'Conservative' }, { value: 'Medium', label: 'Medium' }, { value: 'Aggressive', label: 'Aggressive' }]} />
+          <SelectField label="Trading experience" value={profile.experience_level} onChange={v => setProfile(p => ({ ...p, experience_level: v }))}
+            options={[
+              { value: 'Beginner', label: 'Beginner (0–1 years)' },
+              { value: 'Intermediate', label: 'Intermediate (1–5 years)' },
+              { value: 'Advanced', label: 'Advanced (5+ years)' },
+              { value: 'Professional', label: 'Professional' },
+            ]} />
+        </div>
+      </Section>
+
+      <Section title="API configuration">
+        <div className="space-y-3">
           <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Broker API Key
-            </label>
-            <div className="relative">
+            <label className="block text-xs text-gray-400 mb-1.5">Finnhub API key</label>
+            <div className="flex items-center gap-2">
               <input
                 type={showApiKey ? 'text' : 'password'}
-                value="sk_live_xxxxxxxxxxxxxxxxxxxxxxxx"
                 readOnly
-                className={`w-full px-3 py-2 pr-10 border rounded-md ${
-                  isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-100 border-gray-300 text-gray-900'
-                }`}
+                value={import.meta.env.VITE_FINNHUB_API_KEY ? '••••••••••••••••••••' : 'Not configured'}
+                className="flex-1 px-3 py-2 rounded-xl text-sm text-gray-400 bg-gray-900/40 border border-gray-700/40 cursor-default"
               />
-              <button
-                onClick={() => setShowApiKey(!showApiKey)}
-                className={`absolute right-3 top-1/2 transform -translate-y-1/2 ${
-                  isDarkMode ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              <button onClick={() => setShowApiKey(v => !v)} className="p-2 rounded-lg bg-gray-800 text-gray-400 hover:text-white transition-colors">
+                {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
-            <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              Your API key is encrypted and securely stored
-            </p>
+            <p className="text-xs text-gray-600 mt-1">Set in your .env file as VITE_FINNHUB_API_KEY</p>
           </div>
-          <div className="flex space-x-3">
-            <button className={`px-4 py-2 rounded-md font-medium transition-colors ${
-              isDarkMode ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-            }`}>
-              <RefreshCw size={16} className="mr-2 inline" />
-              Regenerate Key
-            </button>
-            <button className={`px-4 py-2 rounded-md font-medium transition-colors ${
-              isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'
-            }`}>
-              Test Connection
-            </button>
+          <div className="rounded-xl bg-blue-900/20 border border-blue-500/20 p-3 flex gap-2">
+            <Info size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-blue-300">API keys are configured via environment variables for security. Edit your .env file to update them, then restart the dev server.</p>
           </div>
         </div>
-      </div>
+      </Section>
 
-      {/* Success/Error Messages */}
-      {success && (
-        <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-emerald-900/20 border border-emerald-800' : 'bg-emerald-50 border border-emerald-200'}`}>
-          <div className="flex items-center">
-            <CheckCircle2 size={16} className={`mr-2 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`} />
-            <span className={`text-sm ${isDarkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>{success}</span>
-          </div>
-        </div>
-      )}
-
-      {error && (
-        <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-red-900/20 border border-red-800' : 'bg-red-50 border border-red-200'}`}>
-          <div className="flex items-center">
-            <AlertTriangle size={16} className={`mr-2 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`} />
-            <span className={`text-sm ${isDarkMode ? 'text-red-300' : 'text-red-700'}`}>{error}</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const renderTradingSettings = () => (
-    <div className="space-y-8">
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          Trading Parameters
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Initial Capital (₹)
-            </label>
-            <input
-              type="number"
-              value={tradingParameters.initialCapital}
-              onChange={(e) => handleTradingParameterChange('initialCapital', Number(e.target.value))}
-              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            />
-          </div>
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Position Size (%)
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="100"
-              value={tradingParameters.positionSize}
-              onChange={(e) => handleTradingParameterChange('positionSize', Number(e.target.value))}
-              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            />
-          </div>
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Max Open Positions
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="20"
-              value={tradingParameters.maxOpenPositions}
-              onChange={(e) => handleTradingParameterChange('maxOpenPositions', Number(e.target.value))}
-              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            />
-          </div>
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Stop Loss (%)
-            </label>
-            <input
-              type="number"
-              min="0.1"
-              max="50"
-              step="0.1"
-              value={tradingParameters.stopLoss}
-              onChange={(e) => handleTradingParameterChange('stopLoss', Number(e.target.value))}
-              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            />
-          </div>
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Take Profit (%)
-            </label>
-            <input
-              type="number"
-              min="0.1"
-              max="100"
-              step="0.1"
-              value={tradingParameters.takeProfit}
-              onChange={(e) => handleTradingParameterChange('takeProfit', Number(e.target.value))}
-              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          Advanced Options
-        </h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                Trailing Stop Loss
-              </label>
-              <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Automatically adjust stop loss as price moves favorably
-              </p>
-            </div>
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={tradingParameters.trailingStop}
-                onChange={(e) => handleTradingParameterChange('trailingStop', e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                Auto Rebalancing
-              </label>
-              <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Automatically rebalance portfolio based on target allocations
-              </p>
-            </div>
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={tradingParameters.autoRebalance}
-                onChange={(e) => handleTradingParameterChange('autoRebalance', e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-amber-900/20 border border-amber-800' : 'bg-amber-50 border border-amber-200'}`}>
-        <div className="flex items-start">
-          <AlertTriangle size={20} className={`mr-3 mt-0.5 ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`} />
-          <div>
-            <h4 className={`font-medium ${isDarkMode ? 'text-amber-400' : 'text-amber-800'}`}>
-              Risk Warning
-            </h4>
-            <p className={`text-sm mt-1 ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
-              These settings directly affect your trading risk. Higher position sizes and leverage increase both potential profits and losses. Always ensure your risk tolerance aligns with these parameters.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderNotificationSettings = () => (
-    <div className="space-y-6">
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          Notification Channels
-        </h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <Mail size={20} className={`mr-3 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-              <div>
-                <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                  Email Notifications
-                </label>
-                <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Receive notifications via email
-                </p>
-              </div>
-            </div>
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={notifications.email}
-                onChange={(e) => handleNotificationChange('email', e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <Smartphone size={20} className={`mr-3 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`} />
-              <div>
-                <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                  Push Notifications
-                </label>
-                <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Receive push notifications on your device
-                </p>
-              </div>
-            </div>
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={notifications.push}
-                onChange={(e) => handleNotificationChange('push', e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          Alert Types
-        </h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                Price Alerts
-              </label>
-              <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Get notified when stock prices hit your target levels
-              </p>
-            </div>
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={notifications.priceAlerts}
-                onChange={(e) => handleNotificationChange('priceAlerts', e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                Trade Executions
-              </label>
-              <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Notifications when trades are executed
-              </p>
-            </div>
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={notifications.tradeExecutions}
-                onChange={(e) => handleNotificationChange('tradeExecutions', e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                Market News
-              </label>
-              <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Breaking news and market updates
-              </p>
-            </div>
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={notifications.marketNews}
-                onChange={(e) => handleNotificationChange('marketNews', e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                Weekly Reports
-              </label>
-              <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Weekly portfolio performance summaries
-              </p>
-            </div>
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={notifications.weeklyReports}
-                onChange={(e) => handleNotificationChange('weeklyReports', e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderSecuritySettings = () => (
-    <div className="space-y-6">
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          Account Security
-        </h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                Two-Factor Authentication
-              </label>
-              <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Add an extra layer of security to your account
-              </p>
-            </div>
-            <div className="flex items-center space-x-3">
-              <span className={`text-sm ${security.twoFactorEnabled ? 'text-emerald-500' : 'text-gray-500'}`}>
-                {security.twoFactorEnabled ? 'Enabled' : 'Disabled'}
-              </span>
-              <label className="inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={security.twoFactorEnabled}
-                  onChange={(e) => handleSecurityChange('twoFactorEnabled', e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-              </label>
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                Login Alerts
-              </label>
-              <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Get notified of new login attempts
-              </p>
-            </div>
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={security.loginAlerts}
-                onChange={(e) => handleSecurityChange('loginAlerts', e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-          <div>
-            <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-              Session Timeout (minutes)
-            </label>
-            <select
-              value={security.sessionTimeout}
-              onChange={(e) => handleSecurityChange('sessionTimeout', Number(e.target.value))}
-              className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-emerald-500 ${
-                isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-            >
-              <option value={15}>15 minutes</option>
-              <option value={30}>30 minutes</option>
-              <option value={60}>1 hour</option>
-              <option value={120}>2 hours</option>
-              <option value={480}>8 hours</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          Password & Access
-        </h3>
-        <div className="space-y-4">
-          <button className={`w-full px-4 py-3 rounded-md font-medium transition-colors text-left ${
-            isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'
-          }`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <Lock size={20} className="mr-3" />
-                <span>Change Password</span>
-              </div>
-              <span className="text-sm text-gray-500">Last changed 30 days ago</span>
-            </div>
-          </button>
-          <button className={`w-full px-4 py-3 rounded-md font-medium transition-colors text-left ${
-            isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'
-          }`}>
-            <div className="flex items-center">
-              <Download size={20} className="mr-3" />
-              <span>Download Account Data</span>
-            </div>
-          </button>
-        </div>
-      </div>
-
-      <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-red-900/20 border border-red-800' : 'bg-red-50 border border-red-200'}`}>
-        <h4 className={`font-medium mb-2 ${isDarkMode ? 'text-red-400' : 'text-red-800'}`}>
-          Danger Zone
-        </h4>
-        <p className={`text-sm mb-3 ${isDarkMode ? 'text-red-300' : 'text-red-700'}`}>
-          These actions are irreversible. Please proceed with caution.
-        </p>
-        <button className={`px-4 py-2 rounded-md font-medium transition-colors ${
-          isDarkMode ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-red-600 hover:bg-red-700 text-white'
-        }`}>
-          <Trash2 size={16} className="mr-2 inline" />
-          Delete Account
+      <div className="flex justify-end pt-2">
+        <button onClick={saveProfile} disabled={profileLoading} className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-semibold transition-colors">
+          {profileLoading ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+          Save profile
         </button>
       </div>
     </div>
   );
 
-  const renderAppearanceSettings = () => (
+  const renderTrading = () => (
     <div className="space-y-6">
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          Theme Preferences
-        </h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              {isDarkMode ? (
-                <Moon size={20} className="mr-3 text-blue-400" />
-              ) : (
-                <Sun size={20} className="mr-3 text-yellow-500" />
-              )}
-              <div>
-                <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                  Dark Mode
-                </label>
-                <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Switch between light and dark themes
-                </p>
-              </div>
-            </div>
-            <label className="inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isDarkMode}
-                onChange={toggleDarkMode}
-                className="sr-only peer"
-              />
-              <div className="relative w-11 h-6 bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
+      <Section title="Capital & position sizing">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Initial capital (₹)" type="number" value={tradingLocal.initialCapital}
+            onChange={v => setTradingLocal(p => ({ ...p, initialCapital: Number(v) }))} min={1000} />
+          <Field label="Position size" type="number" value={tradingLocal.positionSize}
+            onChange={v => setTradingLocal(p => ({ ...p, positionSize: Number(v) }))} min={1} max={100} suffix="%" />
+          <Field label="Max open positions" type="number" value={tradingLocal.maxOpenPositions}
+            onChange={v => setTradingLocal(p => ({ ...p, maxOpenPositions: Number(v) }))} min={1} max={50} />
+          <Field label="Commission per trade" type="number" value={10} onChange={() => {}} readOnly suffix="₹" />
+        </div>
+      </Section>
+
+      <Section title="Risk controls">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Stop loss" type="number" value={tradingLocal.stopLoss}
+            onChange={v => setTradingLocal(p => ({ ...p, stopLoss: Number(v) }))} min={0.1} max={50} step={0.1} suffix="%" />
+          <Field label="Take profit" type="number" value={tradingLocal.takeProfit}
+            onChange={v => setTradingLocal(p => ({ ...p, takeProfit: Number(v) }))} min={0.1} max={200} step={0.1} suffix="%" />
+        </div>
+        <div className="mt-2 space-y-0">
+          <ToggleRow label="Trailing stop loss" sub="Adjusts stop loss as price moves in your favour"
+            checked={tradingLocal.trailingStop} onChange={v => setTradingLocal(p => ({ ...p, trailingStop: v }))} />
+          <ToggleRow label="Auto rebalance" sub="Automatically rebalance portfolio to target allocations"
+            checked={tradingLocal.autoRebalance} onChange={v => setTradingLocal(p => ({ ...p, autoRebalance: v }))} />
+        </div>
+      </Section>
+
+      <div className="rounded-xl bg-amber-900/20 border border-amber-500/20 p-4 flex gap-3">
+        <AlertTriangle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="text-xs text-amber-300 leading-relaxed">
+          <strong className="text-amber-200">Risk warning:</strong> These settings directly affect your simulated trading risk.
+          Higher position sizes increase both potential profits and losses. The paper trading simulator uses these parameters.
         </div>
       </div>
 
-      <div>
-        <h3 className={`text-lg font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          Data & Storage
-        </h3>
-        <div className="space-y-4">
-          <button className={`w-full px-4 py-3 rounded-md font-medium transition-colors text-left ${
-            isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'
-          }`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <Download size={20} className="mr-3" />
-                <span>Export Trading Data</span>
-              </div>
-              <span className="text-sm text-gray-500">CSV, JSON formats</span>
-            </div>
-          </button>
-          <button className={`w-full px-4 py-3 rounded-md font-medium transition-colors text-left ${
-            isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-900'
-          }`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <Upload size={20} className="mr-3" />
-                <span>Import Strategy Settings</span>
-              </div>
-              <span className="text-sm text-gray-500">JSON format</span>
-            </div>
-          </button>
-        </div>
+      <div className="flex justify-between items-center pt-2">
+        <button onClick={() => setTradingLocal({ initialCapital: 100000, positionSize: 10, maxOpenPositions: 5, stopLoss: 5, takeProfit: 15, trailingStop: false, autoRebalance: false })}
+          className="px-4 py-2 rounded-xl bg-gray-700/50 text-gray-400 hover:text-white text-sm transition-colors">
+          Reset to defaults
+        </button>
+        <button onClick={saveTradingParams} disabled={tradingLoading} className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-semibold transition-colors">
+          {tradingLoading ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+          Save parameters
+        </button>
       </div>
     </div>
   );
 
-  return (
-    <div className="max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className={`text-3xl font-bold mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-          Settings
-        </h1>
-        <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-          Manage your trading preferences, account settings, and platform configuration
-        </p>
-      </div>
+  const renderNotifications = () => (
+    <div className="space-y-6">
+      <Section title="Delivery channels">
+        <div className="rounded-xl bg-gray-800/40 border border-gray-700/40 px-4">
+          <ToggleRow label="Email notifications" sub="Receive updates via email" icon={<Mail size={15} />}
+            checked={notifs.email} onChange={v => updateNotif('email', v)} />
+          <ToggleRow label="Push notifications" sub="Browser notifications when alerts trigger" icon={<Smartphone size={15} />}
+            checked={notifs.push} onChange={v => updateNotif('push', v)} />
+          <ToggleRow label="SMS alerts" sub="Text messages for critical events (premium)"
+            checked={notifs.sms} onChange={v => updateNotif('sms', v)} />
+        </div>
+      </Section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-        <div className="lg:col-span-1">
-          <nav className={`rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'} p-2`}>
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center px-3 py-2.5 text-sm font-medium rounded-md transition-colors mb-1 ${
-                  activeTab === tab.id
-                    ? isDarkMode
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-emerald-100 text-emerald-700'
-                    : isDarkMode
-                    ? 'text-gray-300 hover:bg-gray-700'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                <span className="mr-3">{tab.icon}</span>
-                {tab.name}
-              </button>
-            ))}
-          </nav>
+      <Section title="Alert types">
+        <div className="rounded-xl bg-gray-800/40 border border-gray-700/40 px-4">
+          <ToggleRow label="Price alerts" sub="Notify when watchlist stocks hit your target levels"
+            checked={notifs.priceAlerts} onChange={v => updateNotif('priceAlerts', v)} />
+          <ToggleRow label="Trade executions" sub="Notify when paper trades are placed"
+            checked={notifs.tradeExecutions} onChange={v => updateNotif('tradeExecutions', v)} />
+          <ToggleRow label="Market news" sub="Breaking news and major market events"
+            checked={notifs.marketNews} onChange={v => updateNotif('marketNews', v)} />
+          <ToggleRow label="Weekly portfolio report" sub="Sunday evening summary of your performance"
+            checked={notifs.weeklyReports} onChange={v => updateNotif('weeklyReports', v)} />
+        </div>
+      </Section>
+
+      <div className="rounded-xl bg-blue-900/20 border border-blue-500/20 p-3 flex gap-2">
+        <Info size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
+        <p className="text-xs text-blue-300">Preferences are saved automatically and stored locally. Push notifications require browser permission — click the notification icon in your browser address bar to enable.</p>
+      </div>
+    </div>
+  );
+
+  const renderSecurity = () => (
+    <div className="space-y-6">
+      <Section title="Account security">
+        <div className="rounded-xl bg-gray-800/40 border border-gray-700/40 px-4">
+          <ToggleRow label="Two-factor authentication" sub="Adds an extra layer of security (via Supabase Auth)"
+            checked={security.twoFactorEnabled} onChange={v => updateSecurity('twoFactorEnabled', v)} />
+          <ToggleRow label="Login notifications" sub="Email alert whenever your account is accessed"
+            checked={security.loginAlerts} onChange={v => updateSecurity('loginAlerts', v)} />
+        </div>
+      </Section>
+
+      <Section title="Session">
+        <SelectField label="Session timeout" value={String(security.sessionTimeout)} onChange={v => updateSecurity('sessionTimeout', Number(v))}
+          options={[
+            { value: '15', label: '15 minutes' }, { value: '30', label: '30 minutes' },
+            { value: '60', label: '1 hour' }, { value: '120', label: '2 hours' },
+            { value: '480', label: '8 hours' },
+          ]} />
+      </Section>
+
+      <Section title="Password">
+        <div className="space-y-2">
+          <button onClick={async () => {
+            const { data } = await supabase.auth.getUser();
+            if (data.user?.email) {
+              await supabase.auth.resetPasswordForEmail(data.user.email);
+              showToast('Password reset email sent', 'success');
+            }
+          }} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-800/60 border border-gray-700/50 text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">
+            <Lock size={15} />
+            Send password reset email
+            <ChevronRight size={14} className="ml-auto" />
+          </button>
+          <button onClick={() => signOut()} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-800/60 border border-gray-700/50 text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">
+            <LogOut size={15} />
+            Sign out of all devices
+            <ChevronRight size={14} className="ml-auto" />
+          </button>
+        </div>
+      </Section>
+
+      <Section title="Danger zone">
+        {!deleteConfirm ? (
+          <button onClick={() => setDeleteConfirm(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-900/20 border border-red-500/20 text-red-400 hover:bg-red-900/40 text-sm font-medium transition-colors">
+            <Trash2 size={14} />
+            Delete account
+          </button>
+        ) : (
+          <div className="rounded-xl bg-red-900/20 border border-red-500/30 p-4 space-y-3">
+            <p className="text-sm text-red-300 font-medium">Are you sure? This is irreversible.</p>
+            <p className="text-xs text-red-400">Your portfolio, predictions, and all data will be permanently deleted.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setDeleteConfirm(false)} className="px-4 py-2 rounded-xl bg-gray-700 text-gray-300 text-sm hover:bg-gray-600 transition-colors">Cancel</button>
+              <button onClick={deleteAccount} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-semibold transition-colors">Delete permanently</button>
+            </div>
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+
+  const renderAppearance = () => (
+    <div className="space-y-6">
+      <Section title="Theme">
+        <div className="rounded-xl bg-gray-800/40 border border-gray-700/40 px-4">
+          <ToggleRow label="Dark mode" sub="Switch between light and dark themes"
+            icon={isDarkMode ? <Moon size={15} /> : <Sun size={15} />}
+            checked={isDarkMode} onChange={() => { toggleDarkMode(); showToast('Theme updated', 'success'); }} />
+          <ToggleRow label="Compact mode" sub="Reduce spacing for more information density"
+            checked={appearance.compactMode} onChange={v => updateAppearance('compactMode', v)} />
+        </div>
+      </Section>
+
+      <Section title="Stock list display">
+        <div className="rounded-xl bg-gray-800/40 border border-gray-700/40 px-4">
+          <ToggleRow label="Show volume" sub="Display trading volume in stock lists"
+            checked={appearance.showVolume} onChange={v => updateAppearance('showVolume', v)} />
+          <ToggleRow label="Show sector badge" sub="Display sector labels on stock cards"
+            checked={appearance.showSectorBadge} onChange={v => updateAppearance('showSectorBadge', v)} />
+        </div>
+      </Section>
+
+      <Section title="Chart defaults">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <SelectField label="Default chart period" value={appearance.defaultChart} onChange={v => updateAppearance('defaultChart', v)}
+            options={[
+              { value: '1W', label: '1 Week' }, { value: '1M', label: '1 Month' },
+              { value: '3M', label: '3 Months' }, { value: '6M', label: '6 Months' },
+              { value: '1Y', label: '1 Year' },
+            ]} />
+          <SelectField label="Language" value={appearance.language} onChange={v => updateAppearance('language', v)}
+            options={[{ value: 'en', label: 'English' }, { value: 'hi', label: 'Hindi' }]} />
+        </div>
+      </Section>
+    </div>
+  );
+
+  const renderData = () => (
+    <div className="space-y-6">
+      <Section title="Export your data">
+        <div className="space-y-2">
+          <button onClick={exportData}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-800/60 border border-gray-700/50 text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">
+            <Download size={15} className="text-emerald-400" />
+            <div className="text-left">
+              <p>Export all settings (JSON)</p>
+              <p className="text-xs text-gray-500 mt-0.5">Profile, trading params, notification preferences</p>
+            </div>
+            <ChevronRight size={14} className="ml-auto" />
+          </button>
+          <button onClick={() => {
+            const strategies = localStorage.getItem('mp_strategies') || '[]';
+            const blob = new Blob([strategies], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = 'marketpulse-strategies.json';
+            a.click(); URL.revokeObjectURL(url);
+            showToast('Strategies exported', 'success');
+          }} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-800/60 border border-gray-700/50 text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition-colors">
+            <Download size={15} className="text-violet-400" />
+            <div className="text-left">
+              <p>Export saved strategies (JSON)</p>
+              <p className="text-xs text-gray-500 mt-0.5">All custom algorithms from the Algo Editor</p>
+            </div>
+            <ChevronRight size={14} className="ml-auto" />
+          </button>
+        </div>
+      </Section>
+
+      <Section title="Import settings">
+        <label className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-800/60 border border-gray-700/50 text-sm text-gray-300 hover:text-white hover:bg-gray-800 transition-colors cursor-pointer">
+          <Upload size={15} className="text-blue-400" />
+          <div>
+            <p>Import strategies (JSON)</p>
+            <p className="text-xs text-gray-500 mt-0.5">Previously exported strategy file</p>
+          </div>
+          <input type="file" accept=".json" className="sr-only" onChange={e => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => {
+              try {
+                const data = JSON.parse(ev.target?.result as string);
+                if (Array.isArray(data)) {
+                  localStorage.setItem('mp_strategies', JSON.stringify(data));
+                  showToast(`Imported ${data.length} strategies`, 'success');
+                } else {
+                  showToast('Invalid file format', 'error');
+                }
+              } catch { showToast('Failed to parse file', 'error'); }
+            };
+            reader.readAsText(file);
+          }} />
+        </label>
+      </Section>
+
+      <Section title="Clear local data">
+        <div className="rounded-xl bg-gray-800/40 border border-gray-700/40 p-4 space-y-3">
+          <p className="text-xs text-gray-400">These actions clear data stored in your browser only — your Supabase account data is not affected.</p>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => {
+              localStorage.removeItem('mp_paper_portfolio');
+              showToast('Paper trading data cleared', 'success');
+            }} className="px-3 py-1.5 rounded-lg bg-red-900/20 border border-red-500/20 text-red-400 hover:bg-red-900/40 text-xs font-medium transition-colors">
+              Clear paper trading
+            </button>
+            <button onClick={() => {
+              localStorage.removeItem('mp_price_alerts');
+              showToast('Alerts cleared', 'success');
+            }} className="px-3 py-1.5 rounded-lg bg-red-900/20 border border-red-500/20 text-red-400 hover:bg-red-900/40 text-xs font-medium transition-colors">
+              Clear price alerts
+            </button>
+            <button onClick={() => {
+              localStorage.removeItem('mp_strategies');
+              showToast('Saved strategies cleared', 'success');
+            }} className="px-3 py-1.5 rounded-lg bg-red-900/20 border border-red-500/20 text-red-400 hover:bg-red-900/40 text-xs font-medium transition-colors">
+              Clear strategies
+            </button>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="About">
+        <div className="rounded-xl bg-gray-800/40 border border-gray-700/40 p-4 space-y-2 text-xs text-gray-400">
+          <div className="flex justify-between"><span>Version</span><span className="text-white">0.1.0</span></div>
+          <div className="flex justify-between"><span>Data provider (primary)</span><span className="text-white">Finnhub</span></div>
+          <div className="flex justify-between"><span>Data provider (fallback)</span><span className="text-white">Yahoo Finance</span></div>
+          <div className="flex justify-between"><span>Database</span><span className="text-white">Supabase (PostgreSQL)</span></div>
+          <div className="flex justify-between"><span>News sentiment</span><span className="text-white">NewsData.io</span></div>
+          <div className="flex justify-between"><span>Broker integration</span><span className="text-white">Zerodha Kite</span></div>
+        </div>
+      </Section>
+    </div>
+  );
+
+  const contentMap: Record<string, React.ReactNode> = {
+    profile: renderProfile(),
+    trading: renderTrading(),
+    notifications: renderNotifications(),
+    security: renderSecurity(),
+    appearance: renderAppearance(),
+    data: renderData(),
+  };
+
+  return (
+    <>
+      <ToastContainer toasts={toasts} />
+      <div className="max-w-5xl mx-auto space-y-6 animate-fadeIn">
+        <div>
+          <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'Space Grotesk' }}>Settings</h1>
+          <p className="text-gray-400 text-sm mt-1">Manage your account, trading preferences, and platform configuration</p>
         </div>
 
-        <div className="lg:col-span-3">
-          <div className={`rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'} p-6`}>
-            {activeTab === 'profile' && renderProfileSettings()}
-            {activeTab === 'trading' && renderTradingSettings()}
-            {activeTab === 'notifications' && renderNotificationSettings()}
-            {activeTab === 'security' && renderSecuritySettings()}
-            {activeTab === 'appearance' && renderAppearanceSettings()}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Sidebar nav */}
+          <div className="lg:col-span-1">
+            <div className="rounded-xl bg-gray-800/60 border border-gray-700/50 p-2 space-y-0.5">
+              {tabs.map(tab => {
+                const Icon = tab.icon;
+                return (
+                  <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                      activeTab === tab.id
+                        ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/20'
+                        : 'text-gray-400 hover:text-white hover:bg-gray-700/40'
+                    }`}>
+                    <Icon size={16} />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-            <div className="flex justify-end mt-8 pt-6 border-t border-gray-700">
-              <div className="flex space-x-3">
-                <button className={`px-4 py-2 rounded-md font-medium transition-colors ${
-                  isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'
-                }`}>
-                  Reset to Defaults
-                </button>
-                {activeTab === 'profile' ? (
-                  <button 
-                    onClick={handleSaveProfile}
-                    disabled={loading}
-                    className={`px-6 py-2 rounded-md font-medium transition-colors ${
-                      isDarkMode ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                    }`}
-                  >
-                    {loading ? (
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    ) : (
-                      <>
-                        <Save size={16} className="mr-2 inline" />
-                        Save Changes
-                      </>
-                    )}
-                  </button>
-                ) : (
-                  <button className={`px-6 py-2 rounded-md font-medium transition-colors ${
-                    isDarkMode ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                  }`}>
-                    <Save size={16} className="mr-2 inline" />
-                    Save Changes
-                  </button>
-                )}
-              </div>
+          {/* Main content */}
+          <div className="lg:col-span-3">
+            <div className="rounded-xl bg-gray-800/60 border border-gray-700/50 p-6">
+              {contentMap[activeTab]}
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
