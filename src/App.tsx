@@ -11,6 +11,8 @@ import { SettingsPage } from './pages/SettingsPage';
 import { AlgoEditorPage } from './pages/AlgoEditorPage';
 import { PaperTradingPage } from './pages/PaperTradingPage';
 import { WatchlistPage } from './pages/WatchlistPage';
+import { PortfolioAnalyticsPage } from './pages/PortfolioAnalyticsPage';
+import { AIAssistantPage } from './pages/AIAssistantPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { AppProvider } from './context/AppContext';
 import { useAuth } from './hooks/useAuth';
@@ -47,6 +49,8 @@ function AppContent() {
           <Route path="predictions" element={<PredictionsPage />} />
           <Route path="dashboard" element={<TradingDashboardPage />} />
           <Route path="paper-trading" element={<PaperTradingPage />} />
+          <Route path="analytics" element={<PortfolioAnalyticsPage />} />
+          <Route path="ai-assistant" element={<AIAssistantPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="kite-callback" element={<KiteCallbackPage />} />
         </Route>

@@ -4,22 +4,25 @@ import { NavLink } from 'react-router-dom';
 import {
   Home, TrendingUp, BarChart2, Activity, LineChart,
   Settings, Layers, Code2, FlaskConical, Star,
+  PieChart, Bot,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { LiveTicker } from '../components/LiveTicker';
 import { useAppContext } from '../context/AppContext';
 
 const NAV_ITEMS = [
-  { name: 'Home',           path: '/',              icon: Home,         badge: null    },
-  { name: 'Stocks',         path: '/stocks',        icon: TrendingUp,   badge: null    },
-  { name: 'Watchlist',      path: '/watchlist',     icon: Star,         badge: 'NEW'   },
-  { name: 'Strategies',     path: '/strategies',    icon: Layers,       badge: null    },
-  { name: 'Algo Editor',    path: '/algo-editor',   icon: Code2,        badge: null    },
-  { name: 'Paper Trading',  path: '/paper-trading', icon: FlaskConical, badge: 'SIM'   },
-  { name: 'Backtesting',    path: '/backtesting',   icon: BarChart2,    badge: null    },
-  { name: 'Predictions',    path: '/predictions',   icon: LineChart,    badge: 'AI'    },
-  { name: 'Dashboard',      path: '/dashboard',     icon: Activity,     badge: null    },
-  { name: 'Settings',       path: '/settings',      icon: Settings,     badge: null    },
+  { name: 'Home',           path: '/',              icon: Home,       badge: null    },
+  { name: 'Stocks',         path: '/stocks',        icon: TrendingUp, badge: null    },
+  { name: 'Watchlist',      path: '/watchlist',     icon: Star,       badge: 'NEW'   },
+  { name: 'Strategies',     path: '/strategies',    icon: Layers,     badge: null    },
+  { name: 'Algo Editor',    path: '/algo-editor',   icon: Code2,      badge: null    },
+  { name: 'Paper Trading',  path: '/paper-trading', icon: FlaskConical, badge: 'SIM' },
+  { name: 'Backtesting',    path: '/backtesting',   icon: BarChart2,  badge: null    },
+  { name: 'Predictions',    path: '/predictions',   icon: LineChart,  badge: 'AI'    },
+  { name: 'Dashboard',      path: '/dashboard',     icon: Activity,   badge: null    },
+  { name: 'Analytics',      path: '/analytics',     icon: PieChart,   badge: 'NEW'   },
+  { name: 'AI Assistant',   path: '/ai-assistant',  icon: Bot,        badge: 'AI'    },
+  { name: 'Settings',       path: '/settings',      icon: Settings,   badge: null    },
 ];
 
 const Sidebar: React.FC<{ isOpen: boolean }> = ({ isOpen }) => (
